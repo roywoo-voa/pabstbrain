@@ -206,7 +206,7 @@ with tab1:
             CONCAT('$',FORMAT('%,.0f',SUM(lineItemSubtotalAfterDiscount))) as Revenue,
             CONCAT('$',FORMAT('%,.0f',SUM(grossRevenue - lineItemSubtotalAfterDiscount))) as Discount,
             COUNT(DISTINCT orderNumber) as Orders,
-            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as `St Ides`,
+            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as St_Ides,
             CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as PBR,
             CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as NYF
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
@@ -218,19 +218,19 @@ with tab1:
 with tab2:
     try:
         sb = run_query(f"""
-        SELECT soldBy as `Sales Rep`, COUNT(DISTINCT retailerId) as Accts, COUNT(DISTINCT orderNumber) as Orders,
+        SELECT soldBy as Sales_Rep, COUNT(DISTINCT retailerId) as Accts, COUNT(DISTINCT orderNumber) as Orders,
             SUM(units) as Units,
-            ROUND(SUM(lineItemSubtotal),2) as `Gross Rev`,
+            ROUND(SUM(lineItemSubtotal),2) as Gross_Rev,
             ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
-            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as `Net Rev`,
+            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Net_Rev,
             ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as avg_acct,
             ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount)/NULLIF(SUM(lineItemSubtotal),0)*100,1) as `Disc%`
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY soldBy ORDER BY `Net Rev` DESC
+        WHERE {wc} GROUP BY soldBy ORDER BY Net_Rev DESC
         """)
         fig2 = go.Figure()
-        fig2.add_trace(go.Bar(x=sb['Sales Rep'], y=sb['Net Rev'], marker_color='#38bdf8', opacity=0.85,
-            text=[fmt_currency(v) for v in sb['Net Rev']], textposition='outside',
+        fig2.add_trace(go.Bar(x=sb['Sales_Rep'], y=sb['Net_Rev'], marker_color='#38bdf8', opacity=0.85,
+            text=[fmt_currency(v) for v in sb['Net_Rev']], textposition='outside',
             textfont=dict(family='DM Mono', size=9, color='#94a3b8')))
         fig2.update_layout(paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
             font=dict(family='DM Mono', color='#94a3b8', size=10),
@@ -239,7 +239,7 @@ with tab2:
             yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
         st.plotly_chart(fig2, use_container_width=True)
         disp = sb.copy()
-        for c in ['Gross Rev','Discounts','Net Rev','avg_acct']:
+        for c in ['Gross_Rev','Discounts','Net_Rev','avg_acct']:
             disp[c] = disp[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
         disp['Disc%'] = disp['Disc%'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
         st.dataframe(disp, use_container_width=True, height=350)
@@ -268,7 +268,7 @@ with tab3:
 with tab4:
     try:
         ac = run_query(f"""
-        SELECT retailer as Retailer, siteCity as City, soldBy as `Sales Rep`,
+        SELECT retailer as Retailer, siteCity as City, soldBy as Sales_Rep,
             retailerCreditRating as `Credit Rating`,
             COUNT(DISTINCT orderNumber) as Orders, SUM(units) as Units,
             ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
