@@ -148,9 +148,9 @@ try:
         SUM(units) as units,
         ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as avg_acct,
         COUNTIF(lineItemSubtotalAfterDiscount < 1000) as under1k,
-        ROUND(SUM(CASE WHEN skuDisplayName LIKE '%St Ides%' OR skuDisplayName LIKE '%ST IDES%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as st_ides,
-        ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuDisplayName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
-        ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuDisplayName LIKE '%Father%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf
+        ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as st_ides,
+        ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
+        ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf
     FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
     WHERE {wc}
     """).iloc[0]
@@ -179,9 +179,9 @@ with tab1:
     try:
         cd = run_query(f"""
         SELECT deliveryDate,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%St Ides%' OR skuDisplayName LIKE '%ST IDES%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as st_ides,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuDisplayName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuDisplayName LIKE '%Father%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as st_ides,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf,
             COUNT(DISTINCT orderNumber) as orders,
             ROUND(SUM(grossRevenue - lineRevenue),2) as disc
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
@@ -206,9 +206,9 @@ with tab1:
             CONCAT('$',FORMAT('%,.0f',SUM(lineItemSubtotalAfterDiscount))) as Revenue,
             CONCAT('$',FORMAT('%,.0f',SUM(grossRevenue - lineRevenue))) as Discount,
             COUNT(DISTINCT orderNumber) as Orders,
-            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%St Ides%' OR skuDisplayName LIKE '%ST IDES%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as `St Ides`,
-            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuDisplayName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as PBR,
-            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuDisplayName LIKE '%Father%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as NYF
+            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as `St Ides`,
+            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as PBR,
+            CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as NYF
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
         """)
@@ -223,7 +223,7 @@ with tab2:
             ROUND(SUM(lineItemSubtotal),2) as `Gross Rev`,
             ROUND(SUM(grossRevenue - lineRevenue),2) as Discounts,
             ROUND(SUM(lineItemSubtotalAfterDiscount),2) as `Net Rev`,
-            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as `Avg/Acct`,
+            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as avg_acct,
             ROUND(SUM(grossRevenue - lineRevenue)/NULLIF(SUM(lineItemSubtotal),0)*100,1) as `Disc%`
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY soldBy ORDER BY `Net Rev` DESC
@@ -239,7 +239,7 @@ with tab2:
             yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
         st.plotly_chart(fig2, use_container_width=True)
         disp = sb.copy()
-        for c in ['Gross Rev','Discounts','Net Rev','Avg/Acct']:
+        for c in ['Gross Rev','Discounts','Net Rev','avg_acct']:
             disp[c] = disp[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
         disp['Disc%'] = disp['Disc%'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
         st.dataframe(disp, use_container_width=True, height=350)
@@ -252,13 +252,13 @@ with tab3:
         SELECT skuDisplayName as Product, COUNT(DISTINCT retailerId) as Accts, SUM(units) as Units,
             ROUND(SUM(units)/NULLIF(COUNT(DISTINCT retailerId),0),1) as Velocity,
             ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
-            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(SUM(units),0),2) as `AvgSale$`,
-            ROUND(SUM(lineItemSubtotal)/NULLIF(SUM(units),0),2) as `Target$`
+            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(SUM(units),0),2) as avg_sale,
+            ROUND(SUM(lineItemSubtotal)/NULLIF(SUM(units),0),2) as Target
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY skuDisplayName ORDER BY Revenue DESC
         """)
         d = sku.copy()
-        for c in ['Revenue','AvgSale$','Target$']:
+        for c in ['Revenue','avg_sale','Target']:
             d[c] = d[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
         d['Velocity'] = d['Velocity'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else '0')
         st.dataframe(d, use_container_width=True, height=500)
