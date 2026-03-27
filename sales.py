@@ -249,13 +249,13 @@ with tab2:
 with tab3:
     try:
         sku = run_query(f"""
-        SELECT skuDisplayName as Product, COUNT(DISTINCT retailerId) as Accts, SUM(units) as Units,
+        SELECT skuName as Product, COUNT(DISTINCT retailerId) as Accts, SUM(units) as Units,
             ROUND(SUM(units)/NULLIF(COUNT(DISTINCT retailerId),0),1) as Velocity,
             ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
             ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(SUM(units),0),2) as avg_sale,
             ROUND(SUM(lineItemSubtotal)/NULLIF(SUM(units),0),2) as Target
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY skuDisplayName ORDER BY Revenue DESC
+        WHERE {wc} GROUP BY skuName ORDER BY Revenue DESC
         """)
         d = sku.copy()
         for c in ['Revenue','avg_sale','Target']:
