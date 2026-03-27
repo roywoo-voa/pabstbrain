@@ -206,7 +206,7 @@ with tab1:
     st.markdown('<div class="section-header">Daily Detail</div>', unsafe_allow_html=True)
     try:
         dd = run_query(f"""
-        SELECT CAST(deliveryDate AS STRING) as Date,
+        SELECT deliveryDate as Date,
             ROUND(SUM(grossRevenue),2) as Gross,
             ROUND(SUM(lineItemSubtotal),2) as Invoiced,
             ROUND(SUM(CASE WHEN isPennyOut THEN grossRevenue ELSE 0 END),2) as Penny_Out,
