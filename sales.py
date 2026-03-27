@@ -33,7 +33,15 @@ div[data-testid="stMetricValue"] { font-family: 'DM Mono', monospace !important;
 
 @st.cache_resource
 def get_bq_client():
-    return bigquery.Client(project="amplified-name-490015-e0")
+    from google.oauth2 import service_account
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/bigquery"]
+        )
+        return bigquery.Client(credentials=creds, project="amplified-name-490015-e0")
+    except:
+        return bigquery.Client(project="amplified-name-490015-e0")
 
 @st.cache_data(ttl=300)
 def run_query(sql):
