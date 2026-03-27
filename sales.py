@@ -140,8 +140,8 @@ wc = " AND ".join(where)
 try:
     s = run_query(f"""
     SELECT
-        ROUND(SUM(grossRevenue),2) as gross,
         ROUND(SUM(lineItemSubtotal),2) as invoiced,
+        ROUND(SUM(grossRevenue),2) as gross,
         ROUND(SUM(grossRevenue - netRevenue),2) as disc,
         ROUND(SUM(CASE WHEN isPennyOut THEN grossRevenue ELSE 0 END),2) as penny_out,
         ROUND(SUM(netRevenue),2) as net,
@@ -158,8 +158,8 @@ try:
     """).iloc[0]
 
     k1,k2,k3,k4,k5,k6,k7,k8,k9 = st.columns(9)
-    k1.markdown(f'<div class="kpi-card"><div class="kpi-label">Gross Revenue</div><div class="kpi-value">{fmt_currency(s.gross)}</div></div>', unsafe_allow_html=True)
-    k2.markdown(f'<div class="kpi-card"><div class="kpi-label">Invoiced Total</div><div class="kpi-value">{fmt_currency(s.invoiced)}</div></div>', unsafe_allow_html=True)
+    k1.markdown(f'<div class="kpi-card"><div class="kpi-label">Invoiced Total</div><div class="kpi-value">{fmt_currency(s.invoiced)}</div></div>', unsafe_allow_html=True)
+    k2.markdown(f'<div class="kpi-card"><div class="kpi-label">Gross (List)</div><div class="kpi-value">{fmt_currency(s.gross)}</div></div>', unsafe_allow_html=True)
     k3.markdown(f'<div class="kpi-card"><div class="kpi-label">Total Discount</div><div class="kpi-value kpi-negative">{fmt_currency(s.disc)}</div></div>', unsafe_allow_html=True)
     k4.markdown(f'<div class="kpi-card"><div class="kpi-label">Penny-Out Promos</div><div class="kpi-value kpi-negative">{fmt_currency(s.penny_out)}</div></div>', unsafe_allow_html=True)
     k5.markdown(f'<div class="kpi-card"><div class="kpi-label">Net Revenue</div><div class="kpi-value kpi-positive">{fmt_currency(s.net)}</div></div>', unsafe_allow_html=True)
