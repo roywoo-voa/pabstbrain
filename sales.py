@@ -208,6 +208,7 @@ with tab1:
         dd = run_query(f"""
         SELECT CAST(deliveryDate AS STRING) as Date,
             ROUND(SUM(grossRevenue),2) as Gross,
+            ROUND(SUM(lineItemSubtotal),2) as Invoiced,
             ROUND(SUM(CASE WHEN isPennyOut THEN grossRevenue ELSE 0 END),2) as Penny_Out,
             ROUND(SUM(grossRevenue - netRevenue),2) as Discount,
             ROUND(SUM(netRevenue),2) as Net,
@@ -218,7 +219,7 @@ with tab1:
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
         """)
-        for c in ['Gross','Penny_Out','Discount','Net','St_Ides','PBR','NYF']:
+        for c in ['Gross','Invoiced','Penny_Out','Discount','Net','St_Ides','PBR','NYF']:
             if c in dd.columns:
                 dd[c] = dd[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(dd, use_container_width=True, height=300)
