@@ -197,7 +197,7 @@ with tab1:
             xaxis=dict(gridcolor='#1e2d4a', showgrid=False),
             yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
         st.plotly_chart(fig, use_container_width=True)
-    except: st.info("Chart loading...")
+    except Exception as e: st.error(f"Chart error: {str(e)[:200]}")
 
     st.markdown('<div class="section-header">Daily Detail</div>', unsafe_allow_html=True)
     try:
