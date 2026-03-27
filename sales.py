@@ -213,7 +213,7 @@ with tab1:
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
         """)
         st.dataframe(dd, use_container_width=True, height=300)
-    except: st.info("Loading...")
+    except Exception as e: st.error(f"Daily detail error: {str(e)[:200]}")
 
 with tab2:
     try:
