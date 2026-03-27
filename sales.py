@@ -203,12 +203,12 @@ with tab1:
     try:
         dd = run_query(f"""
         SELECT CAST(deliveryDate AS STRING) as Date,
-            CONCAT('$',FORMAT('%d',SUM(lineItemSubtotalAfterDiscount))) as Revenue,
-            CONCAT('$',FORMAT('%d',SUM(grossRevenue - lineItemSubtotalAfterDiscount))) as Discount,
+            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discount,
             COUNT(DISTINCT orderNumber) as Orders,
-            CONCAT('$',FORMAT('%d',SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as St_Ides,
-            CONCAT('$',FORMAT('%d',SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as PBR,
-            CONCAT('$',FORMAT('%d',SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as NYF
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as St_Ides,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as PBR,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as NYF
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
         """)
