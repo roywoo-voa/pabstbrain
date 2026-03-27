@@ -140,9 +140,9 @@ wc = " AND ".join(where)
 try:
     s = run_query(f"""
     SELECT
-        ROUND(SUM(lineItemSubtotal),2) as gross,
-        ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as disc,
-        ROUND(SUM(lineItemSubtotalAfterDiscount),2) as net,
+        ROUND(SUM(grossRevenue),2) as gross,
+        ROUND(SUM(grossRevenue - netRevenue),2) as disc,
+        ROUND(SUM(netRevenue),2) as net,
         COUNT(DISTINCT orderNumber) as orders,
         COUNT(DISTINCT retailerId) as accts,
         SUM(units) as units,
@@ -183,7 +183,7 @@ with tab1:
             ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
             ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf,
             COUNT(DISTINCT orderNumber) as orders,
-            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as disc
+            ROUND(SUM(grossRevenue - netRevenue),2) as disc
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate
         """)
