@@ -192,7 +192,7 @@ with tab1:
             fig.add_trace(go.Bar(name=lbl, x=cd['deliveryDate'], y=cd[col], marker_color=clr, opacity=0.9))
         fig.update_layout(barmode='stack', paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
             font=dict(family='DM Mono', color='#94a3b8', size=10),
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, bgcolor='transparent'),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, bgcolor='rgba(0,0,0,0)'),
             margin=dict(l=0,r=0,t=10,b=0), height=280,
             xaxis=dict(gridcolor='#1e2d4a', showgrid=False),
             yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
