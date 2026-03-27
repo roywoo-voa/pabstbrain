@@ -76,9 +76,9 @@ def get_period_dates(period):
 
 def fmt_currency(v):
     if v is None or (isinstance(v, float) and pd.isna(v)): return "$0"
-    if abs(v) >= 1_000_000: return f"${v:,.0f}"
-    if abs(v) >= 1_000: return f"${v:,.0f}"
-    return f"${v:,.0f}"
+    if abs(v) >= 1_000_000: return f"${v:,.2f}"
+    if abs(v) >= 1_000: return f"${v:,.2f}"
+    return f"${v:,.2f}"
 
 def fmt_number(v):
     if v is None: return "0"
