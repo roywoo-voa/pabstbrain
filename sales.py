@@ -141,7 +141,7 @@ try:
     s = run_query(f"""
     SELECT
         ROUND(SUM(lineItemSubtotal),2) as gross,
-        ROUND(SUM(grossRevenue - lineRevenue),2) as disc,
+        ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as disc,
         ROUND(SUM(lineItemSubtotalAfterDiscount),2) as net,
         COUNT(DISTINCT orderNumber) as orders,
         COUNT(DISTINCT retailerId) as accts,
@@ -183,7 +183,7 @@ with tab1:
             ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
             ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf,
             COUNT(DISTINCT orderNumber) as orders,
-            ROUND(SUM(grossRevenue - lineRevenue),2) as disc
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as disc
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate
         """)
@@ -204,7 +204,7 @@ with tab1:
         dd = run_query(f"""
         SELECT CAST(deliveryDate AS STRING) as Date,
             CONCAT('$',FORMAT('%,.0f',SUM(lineItemSubtotalAfterDiscount))) as Revenue,
-            CONCAT('$',FORMAT('%,.0f',SUM(grossRevenue - lineRevenue))) as Discount,
+            CONCAT('$',FORMAT('%,.0f',SUM(grossRevenue - lineItemSubtotalAfterDiscount))) as Discount,
             COUNT(DISTINCT orderNumber) as Orders,
             CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as `St Ides`,
             CONCAT('$',FORMAT('%,.0f',SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END))) as PBR,
@@ -221,10 +221,10 @@ with tab2:
         SELECT soldBy as `Sales Rep`, COUNT(DISTINCT retailerId) as Accts, COUNT(DISTINCT orderNumber) as Orders,
             SUM(units) as Units,
             ROUND(SUM(lineItemSubtotal),2) as `Gross Rev`,
-            ROUND(SUM(grossRevenue - lineRevenue),2) as Discounts,
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
             ROUND(SUM(lineItemSubtotalAfterDiscount),2) as `Net Rev`,
             ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as avg_acct,
-            ROUND(SUM(grossRevenue - lineRevenue)/NULLIF(SUM(lineItemSubtotal),0)*100,1) as `Disc%`
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount)/NULLIF(SUM(lineItemSubtotal),0)*100,1) as `Disc%`
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY soldBy ORDER BY `Net Rev` DESC
         """)
@@ -272,7 +272,7 @@ with tab4:
             retailerCreditRating as `Credit Rating`,
             COUNT(DISTINCT orderNumber) as Orders, SUM(units) as Units,
             ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
-            ROUND(SUM(grossRevenue - lineRevenue),2) as Discounts,
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
             ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT orderNumber),0),2) as `Avg Order`,
             CAST(MAX(deliveryDate) AS STRING) as `Last Delivery`
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
