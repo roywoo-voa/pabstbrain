@@ -212,6 +212,9 @@ with tab1:
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
         """)
+        for c in ['Revenue','Discount','St_Ides','PBR','NYF']:
+            if c in dd.columns:
+                dd[c] = dd[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(dd, use_container_width=True, height=300)
     except Exception as e: st.error(f"Daily detail error: {str(e)[:200]}")
 
