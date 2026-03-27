@@ -207,16 +207,18 @@ with tab1:
     try:
         dd = run_query(f"""
         SELECT CAST(deliveryDate AS STRING) as Date,
-            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
-            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discount,
+            ROUND(SUM(grossRevenue),2) as Gross,
+            ROUND(SUM(CASE WHEN isPennyOut THEN grossRevenue ELSE 0 END),2) as Penny_Out,
+            ROUND(SUM(grossRevenue - netRevenue),2) as Discount,
+            ROUND(SUM(netRevenue),2) as Net,
             COUNT(DISTINCT orderNumber) as Orders,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as St_Ides,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as PBR,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as NYF
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN netRevenue ELSE 0 END),2) as St_Ides,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN netRevenue ELSE 0 END),2) as PBR,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN netRevenue ELSE 0 END),2) as NYF
         FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
         WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
         """)
-        for c in ['Revenue','Discount','St_Ides','PBR','NYF']:
+        for c in ['Gross','Penny_Out','Discount','Net','St_Ides','PBR','NYF']:
             if c in dd.columns:
                 dd[c] = dd[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(dd, use_container_width=True, height=300)
