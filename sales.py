@@ -179,7 +179,6 @@ except Exception as e:
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Summary", "Sold By", "SKU Details", "Accts Rev/Gaps", "AR Aging"])
 
-
 with tab1:
     try:
         cd = run_query(f"""
@@ -301,252 +300,46 @@ with tab4:
     except Exception as e:
         st.info(f"Loading... {str(e)[:60]}")
 
-with tab5:
-    show_ar_aging()
-
-st.markdown(f'<div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;display:flex;justify-content:space-between"><span>PABSTBRAIN v1.0</span><span>{start_date} → {end_date}</span><span>Refreshes every 5 min</span></div>', unsafe_allow_html=True)
-
-
-with tab1:
-    try:
-        cd = run_query(f"""
-        SELECT deliveryDate,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as st_ides,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf,
-            COUNT(DISTINCT orderNumber) as orders,
-            ROUND(SUM(grossRevenue - netRevenue),2) as disc
-        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate
-        """)
-        fig = go.Figure()
-        for col, clr, lbl in [('st_ides','#38bdf8','St Ides'),('pbr','#818cf8','PBR'),('nyf','#a78bfa','NYF')]:
-            fig.add_trace(go.Bar(name=lbl, x=cd['deliveryDate'], y=cd[col], marker_color=clr, opacity=0.9))
-        fig.update_layout(barmode='stack', paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
-            font=dict(family='DM Mono', color='#94a3b8', size=10),
-            legend=dict(orientation='h', yanchor='top', y=-0.15, xanchor='center', x=0.5, bgcolor='rgba(0,0,0,0)'),
-            margin=dict(l=0,r=0,t=10,b=0), height=280,
-            xaxis=dict(gridcolor='#1e2d4a', showgrid=False),
-            yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
-        st.plotly_chart(fig, use_container_width=True)
-    except Exception as e: st.error(f"Chart error: {str(e)[:200]}")
-
-    st.markdown('<div class="section-header">Daily Detail</div>', unsafe_allow_html=True)
-    try:
-        dd = run_query(f"""
-        SELECT deliveryDate as Date,
-            ROUND(SUM(grossRevenue),2) as Gross,
-            ROUND(SUM(lineItemSubtotal),2) as Invoiced,
-            ROUND(SUM(CASE WHEN isPennyOut THEN grossRevenue ELSE 0 END),2) as Penny_Out,
-            ROUND(SUM(grossRevenue - netRevenue),2) as Discount,
-            ROUND(SUM(netRevenue),2) as Net,
-            COUNT(DISTINCT orderNumber) as Orders,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN netRevenue ELSE 0 END),2) as St_Ides,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN netRevenue ELSE 0 END),2) as PBR,
-            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN netRevenue ELSE 0 END),2) as NYF
-        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
-        """)
-        for c in ['Gross','Invoiced','Penny_Out','Discount','Net','St_Ides','PBR','NYF']:
-            if c in dd.columns:
-                dd[c] = dd[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-        st.dataframe(dd, use_container_width=True, height=300)
-    except Exception as e: st.error(f"Daily detail error: {str(e)[:200]}")
-
-with tab2:
-    try:
-        sb = run_query(f"""
-        SELECT soldBy as Sales_Rep, COUNT(DISTINCT retailerId) as Accts, COUNT(DISTINCT orderNumber) as Orders,
-            SUM(units) as Units,
-            ROUND(SUM(lineItemSubtotal),2) as Gross_Rev,
-            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
-            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Net_Rev,
-            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as avg_acct,
-            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount)/NULLIF(SUM(lineItemSubtotal),0)*100,1) as `Disc%`
-        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY soldBy ORDER BY Net_Rev DESC
-        """)
-        fig2 = go.Figure()
-        fig2.add_trace(go.Bar(x=sb['Sales_Rep'], y=sb['Net_Rev'], marker_color='#38bdf8', opacity=0.85,
-            text=[fmt_currency(v) for v in sb['Net_Rev']], textposition='outside',
-            textfont=dict(family='DM Mono', size=9, color='#94a3b8')))
-        fig2.update_layout(paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
-            font=dict(family='DM Mono', color='#94a3b8', size=10),
-            margin=dict(l=0,r=0,t=30,b=60), height=260,
-            xaxis=dict(gridcolor='#1e2d4a', tickangle=-30),
-            yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
-        st.plotly_chart(fig2, use_container_width=True)
-        disp = sb.copy()
-        for c in ['Gross_Rev','Discounts','Net_Rev','avg_acct']:
-            disp[c] = disp[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
-        disp['Disc%'] = disp['Disc%'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
-        st.dataframe(disp, use_container_width=True, height=350)
-    except Exception as e:
-        st.info(f"Loading... {str(e)[:60]}")
-
-with tab3:
-    try:
-        sku = run_query(f"""
-        SELECT skuName as Product, COUNT(DISTINCT retailerId) as Accts, SUM(units) as Units,
-            ROUND(SUM(units)/NULLIF(COUNT(DISTINCT retailerId),0),1) as Velocity,
-            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
-            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(SUM(units),0),2) as avg_sale,
-            ROUND(SUM(lineItemSubtotal)/NULLIF(SUM(units),0),2) as Target
-        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY skuName ORDER BY Revenue DESC
-        """)
-        d = sku.copy()
-        for c in ['Revenue','avg_sale','Target']:
-            d[c] = d[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
-        d['Velocity'] = d['Velocity'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else '0')
-        st.dataframe(d, use_container_width=True, height=500)
-    except Exception as e:
-        st.info(f"Loading... {str(e)[:60]}")
-
-with tab4:
-    try:
-        ac = run_query(f"""
-        SELECT retailer as Retailer, siteCity as City, soldBy as Sales_Rep,
-            retailerCreditRating as `Credit Rating`,
-            COUNT(DISTINCT orderNumber) as Orders, SUM(units) as Units,
-            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
-            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
-            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT orderNumber),0),2) as `Avg Order`,
-            CAST(MAX(deliveryDate) AS STRING) as `Last Delivery`
-        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-        WHERE {wc} GROUP BY retailer,siteCity,soldBy,retailerCreditRating ORDER BY Revenue DESC
-        """)
-        a1,a2,a3,a4 = st.columns(4)
-        a1.metric("Total Accounts", fmt_number(len(ac)))
-        a2.metric("Avg Rev/Acct", fmt_currency(ac['Revenue'].mean()))
-        a3.metric("Top Account", fmt_currency(ac['Revenue'].max()))
-        a4.metric("Accts < $500", fmt_number((ac['Revenue'] < 500).sum()))
-        d = ac.copy()
-        for c in ['Revenue','Discounts','Avg Order']:
-            d[c] = d[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
-        st.dataframe(d, use_container_width=True, height=450)
-    except Exception as e:
-        st.info(f"Loading... {str(e)[:60]}")
 
 with tab5:
-    show_ar_aging()
-
-st.markdown(f'<div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;display:flex;justify-content:space-between"><span>PABSTBRAIN v1.0</span><span>{start_date} → {end_date}</span><span>Refreshes every 5 min</span></div>', unsafe_allow_html=True)
-
-# ── AR AGING PAGE ──────────────────────────────────────────────
-def show_ar_aging():
-    st.markdown('<div class="section-header">AR Aging Summary</div>', unsafe_allow_html=True)
-    
-    # Filters
+    # AR Aging filters
     col1, col2, col3 = st.columns(3)
     with col1:
-        rep_filter = st.selectbox("Filter by Rep", ["All Reps"] + 
-            run_query("SELECT DISTINCT soldBy FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist())
+        ar_rep = st.selectbox("Rep", ["All Reps"] + run_query("SELECT DISTINCT soldBy FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist(), key="ar_rep")
     with col2:
-        city_filter = st.selectbox("Filter by City", ["All Cities"] + 
-            run_query("SELECT DISTINCT siteCity FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE siteCity IS NOT NULL ORDER BY siteCity")['siteCity'].tolist())
+        ar_city = st.selectbox("City", ["All Cities"] + run_query("SELECT DISTINCT siteCity FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE siteCity IS NOT NULL AND siteCity != '' ORDER BY siteCity")['siteCity'].tolist(), key="ar_city")
     with col3:
-        bucket_filter = st.selectbox("Filter by Bucket", ["All Buckets", "Current (0-15)", "Early (16-30)", "Warning (31-45)", "Late (46-60)", "Serious (61-90)", "Collections (90+)"])
+        ar_bucket = st.selectbox("Bucket", ["All","Current (0-15)","Early (16-30)","Warning (31-45)","Late (46-60)","Serious (61-90)","Collections (90+)"], key="ar_bucket")
 
-    where = ["paymentStatus NOT IN ('PAID','REMITTED')"]
-    if rep_filter != "All Reps": where.append(f"soldBy = '{rep_filter}'")
-    if city_filter != "All Cities": where.append(f"siteCity = '{city_filter}'")
-    if bucket_filter != "All Buckets": where.append(f"agingBucket = '{bucket_filter}'")
-    wc = " AND ".join(where)
-
-    # Summary KPIs
-    try:
-        summary = run_query(f"""
-        SELECT
-          SUM(CASE WHEN agingRank = 1 THEN billableAmount ELSE 0 END) as current_amt,
-          SUM(CASE WHEN agingRank = 2 THEN billableAmount ELSE 0 END) as early_amt,
-          SUM(CASE WHEN agingRank = 3 THEN billableAmount ELSE 0 END) as warning_amt,
-          SUM(CASE WHEN agingRank = 4 THEN billableAmount ELSE 0 END) as late_amt,
-          SUM(CASE WHEN agingRank = 5 THEN billableAmount ELSE 0 END) as serious_amt,
-          SUM(CASE WHEN agingRank = 6 THEN billableAmount ELSE 0 END) as collections_amt,
-          SUM(billableAmount) as total_outstanding
-        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
-        WHERE {wc}
-        """).iloc[0]
-
-        k1,k2,k3,k4,k5,k6,k7 = st.columns(7)
-        k1.markdown(f'<div class="kpi-card" style="border-left:3px solid #34d399"><div class="kpi-label">Current (0-15)</div><div class="kpi-value" style="color:#34d399">{fmt_currency(summary.current_amt)}</div></div>', unsafe_allow_html=True)
-        k2.markdown(f'<div class="kpi-card" style="border-left:3px solid #fbbf24"><div class="kpi-label">Early (16-30)</div><div class="kpi-value" style="color:#fbbf24">{fmt_currency(summary.early_amt)}</div></div>', unsafe_allow_html=True)
-        k3.markdown(f'<div class="kpi-card" style="border-left:3px solid #f97316"><div class="kpi-label">Warning (31-45)</div><div class="kpi-value" style="color:#f97316">{fmt_currency(summary.warning_amt)}</div></div>', unsafe_allow_html=True)
-        k4.markdown(f'<div class="kpi-card" style="border-left:3px solid #ef4444"><div class="kpi-label">Late (46-60)</div><div class="kpi-value" style="color:#ef4444">{fmt_currency(summary.late_amt)}</div></div>', unsafe_allow_html=True)
-        k5.markdown(f'<div class="kpi-card" style="border-left:3px solid #dc2626"><div class="kpi-label">Serious (61-90)</div><div class="kpi-value" style="color:#dc2626">{fmt_currency(summary.serious_amt)}</div></div>', unsafe_allow_html=True)
-        k6.markdown(f'<div class="kpi-card" style="border-left:3px solid #7f1d1d"><div class="kpi-label">Collections (90+)</div><div class="kpi-value" style="color:#f87171">{fmt_currency(summary.collections_amt)}</div></div>', unsafe_allow_html=True)
-        k7.markdown(f'<div class="kpi-card" style="border-left:3px solid #38bdf8"><div class="kpi-label">Total Outstanding</div><div class="kpi-value" style="color:#38bdf8">{fmt_currency(summary.total_outstanding)}</div></div>', unsafe_allow_html=True)
-    except Exception as e:
-        st.error(f"AR summary error: {str(e)[:200]}")
-
-    # Detail table
-    st.markdown('<div class="section-header">Order Detail</div>', unsafe_allow_html=True)
-    try:
-        ar = run_query(f"""
-        SELECT
-          retailer as Retailer,
-          siteCity as City,
-          soldBy as Rep,
-          orderNumber as Order,
-          CAST(deliveryDate AS STRING) as Delivered,
-          daysSinceDelivery as Days,
-          agingBucket as Bucket,
-          paymentStatus as Status,
-          retailerCreditRating as Rating,
-          ROUND(billableAmount,2) as Outstanding
-        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
-        WHERE {wc}
-        ORDER BY agingRank DESC, billableAmount DESC
-        """)
-        ar['Outstanding'] = ar['Outstanding'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-        st.dataframe(ar, use_container_width=True, height=500)
-    except Exception as e:
-        st.error(f"AR detail error: {str(e)[:200]}")
-# ── AR AGING PAGE ──────────────────────────────────────────────
-def show_ar_aging():
-    st.markdown('<div class="section-header">AR Aging Summary</div>', unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        rep_opts = ["All Reps"] + run_query("SELECT DISTINCT soldBy FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist()
-        rep_filter = st.selectbox("Filter by Rep", rep_opts, key="ar_rep")
-    with col2:
-        city_opts = ["All Cities"] + run_query("SELECT DISTINCT siteCity FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE siteCity IS NOT NULL AND siteCity != '' ORDER BY siteCity")['siteCity'].tolist()
-        city_filter = st.selectbox("Filter by City", city_opts, key="ar_city")
-    with col3:
-        bucket_filter = st.selectbox("Filter by Bucket", ["All Buckets","Current (0-15)","Early (16-30)","Warning (31-45)","Late (46-60)","Serious (61-90)","Collections (90+)"], key="ar_bucket")
-
-    where = ["paymentStatus NOT IN ('PAID','REMITTED')"]
-    if rep_filter != "All Reps": where.append(f"soldBy = '{rep_filter}'")
-    if city_filter != "All Cities": where.append(f"siteCity = '{city_filter}'")
-    if bucket_filter != "All Buckets": where.append(f"agingBucket = '{bucket_filter}'")
-    wc = " AND ".join(where)
+    ar_where = ["paymentStatus NOT IN ('PAID','REMITTED')"]
+    if ar_rep != "All Reps": ar_where.append(f"soldBy = '{ar_rep}'")
+    if ar_city != "All Cities": ar_where.append(f"siteCity = '{ar_city}'")
+    if ar_bucket != "All": ar_where.append(f"agingBucket = '{ar_bucket}'")
+    ar_wc = " AND ".join(ar_where)
 
     try:
         s = run_query(f"""
         SELECT
-          SUM(CASE WHEN agingRank=1 THEN billableAmount ELSE 0 END) as current_amt,
-          SUM(CASE WHEN agingRank=2 THEN billableAmount ELSE 0 END) as early_amt,
-          SUM(CASE WHEN agingRank=3 THEN billableAmount ELSE 0 END) as warning_amt,
-          SUM(CASE WHEN agingRank=4 THEN billableAmount ELSE 0 END) as late_amt,
-          SUM(CASE WHEN agingRank=5 THEN billableAmount ELSE 0 END) as serious_amt,
-          SUM(CASE WHEN agingRank=6 THEN billableAmount ELSE 0 END) as collections_amt,
-          SUM(billableAmount) as total_outstanding
-        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE {wc}
+          SUM(CASE WHEN agingRank=1 THEN billableAmount ELSE 0 END) as a1,
+          SUM(CASE WHEN agingRank=2 THEN billableAmount ELSE 0 END) as a2,
+          SUM(CASE WHEN agingRank=3 THEN billableAmount ELSE 0 END) as a3,
+          SUM(CASE WHEN agingRank=4 THEN billableAmount ELSE 0 END) as a4,
+          SUM(CASE WHEN agingRank=5 THEN billableAmount ELSE 0 END) as a5,
+          SUM(CASE WHEN agingRank=6 THEN billableAmount ELSE 0 END) as a6,
+          SUM(billableAmount) as total
+        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE {ar_wc}
         """).iloc[0]
         k1,k2,k3,k4,k5,k6,k7 = st.columns(7)
-        k1.markdown(f'<div class="kpi-card" style="border-left:3px solid #34d399"><div class="kpi-label">Current (0-15)</div><div class="kpi-value" style="color:#34d399">{fmt_currency(s.current_amt)}</div></div>', unsafe_allow_html=True)
-        k2.markdown(f'<div class="kpi-card" style="border-left:3px solid #fbbf24"><div class="kpi-label">Early (16-30)</div><div class="kpi-value" style="color:#fbbf24">{fmt_currency(s.early_amt)}</div></div>', unsafe_allow_html=True)
-        k3.markdown(f'<div class="kpi-card" style="border-left:3px solid #f97316"><div class="kpi-label">Warning (31-45)</div><div class="kpi-value" style="color:#f97316">{fmt_currency(s.warning_amt)}</div></div>', unsafe_allow_html=True)
-        k4.markdown(f'<div class="kpi-card" style="border-left:3px solid #ef4444"><div class="kpi-label">Late (46-60)</div><div class="kpi-value" style="color:#ef4444">{fmt_currency(s.late_amt)}</div></div>', unsafe_allow_html=True)
-        k5.markdown(f'<div class="kpi-card" style="border-left:3px solid #dc2626"><div class="kpi-label">Serious (61-90)</div><div class="kpi-value" style="color:#dc2626">{fmt_currency(s.serious_amt)}</div></div>', unsafe_allow_html=True)
-        k6.markdown(f'<div class="kpi-card" style="border-left:3px solid #7f1d1d"><div class="kpi-label">Collections (90+)</div><div class="kpi-value" style="color:#f87171">{fmt_currency(s.collections_amt)}</div></div>', unsafe_allow_html=True)
-        k7.markdown(f'<div class="kpi-card" style="border-left:3px solid #38bdf8"><div class="kpi-label">Total Outstanding</div><div class="kpi-value" style="color:#38bdf8">{fmt_currency(s.total_outstanding)}</div></div>', unsafe_allow_html=True)
+        k1.markdown(f'''<div class="kpi-card" style="border-left:3px solid #34d399"><div class="kpi-label">Current (0-15)</div><div class="kpi-value" style="color:#34d399">{fmt_currency(s.a1)}</div></div>''', unsafe_allow_html=True)
+        k2.markdown(f'''<div class="kpi-card" style="border-left:3px solid #fbbf24"><div class="kpi-label">Early (16-30)</div><div class="kpi-value" style="color:#fbbf24">{fmt_currency(s.a2)}</div></div>''', unsafe_allow_html=True)
+        k3.markdown(f'''<div class="kpi-card" style="border-left:3px solid #f97316"><div class="kpi-label">Warning (31-45)</div><div class="kpi-value" style="color:#f97316">{fmt_currency(s.a3)}</div></div>''', unsafe_allow_html=True)
+        k4.markdown(f'''<div class="kpi-card" style="border-left:3px solid #ef4444"><div class="kpi-label">Late (46-60)</div><div class="kpi-value" style="color:#ef4444">{fmt_currency(s.a4)}</div></div>''', unsafe_allow_html=True)
+        k5.markdown(f'''<div class="kpi-card" style="border-left:3px solid #dc2626"><div class="kpi-label">Serious (61-90)</div><div class="kpi-value" style="color:#dc2626">{fmt_currency(s.a5)}</div></div>''', unsafe_allow_html=True)
+        k6.markdown(f'''<div class="kpi-card" style="border-left:3px solid #7f1d1d"><div class="kpi-label">Collections (90+)</div><div class="kpi-value" style="color:#f87171">{fmt_currency(s.a6)}</div></div>''', unsafe_allow_html=True)
+        k7.markdown(f'''<div class="kpi-card" style="border-left:3px solid #38bdf8"><div class="kpi-label">Total Outstanding</div><div class="kpi-value" style="color:#38bdf8">{fmt_currency(s.total)}</div></div>''', unsafe_allow_html=True)
     except Exception as e:
         st.error(f"AR summary error: {str(e)[:200]}")
 
-    st.markdown('<div class="section-header">Order Detail</div>', unsafe_allow_html=True)
     try:
         ar = run_query(f"""
         SELECT retailer as Retailer, siteCity as City, soldBy as Rep,
@@ -555,9 +348,11 @@ def show_ar_aging():
           paymentStatus as Status, retailerCreditRating as Rating,
           ROUND(billableAmount,2) as Outstanding
         FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
-        WHERE {wc} ORDER BY agingRank DESC, billableAmount DESC
+        WHERE {ar_wc} ORDER BY agingRank DESC, billableAmount DESC
         """)
         ar['Outstanding'] = ar['Outstanding'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(ar, use_container_width=True, height=500)
     except Exception as e:
         st.error(f"AR detail error: {str(e)[:200]}")
+
+st.markdown(f'<div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;display:flex;justify-content:space-between"><span>PABSTBRAIN v1.0</span><span>{start_date} → {end_date}</span><span>Refreshes every 5 min</span></div>', unsafe_allow_html=True)
