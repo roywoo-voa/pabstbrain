@@ -177,7 +177,7 @@ except Exception as e:
     st.warning(f"Waiting for data... {str(e)[:80]}")
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["Summary", "Sold By", "SKU Details", "Accts Rev/Gaps"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Summary", "Sold By", "SKU Details", "Accts Rev/Gaps", "AR Aging"])
 
 with tab1:
     try:
@@ -300,4 +300,136 @@ with tab4:
     except Exception as e:
         st.info(f"Loading... {str(e)[:60]}")
 
+with tab5:
+    show_ar_aging()
+
 st.markdown(f'<div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;display:flex;justify-content:space-between"><span>PABSTBRAIN v1.0</span><span>{start_date} → {end_date}</span><span>Refreshes every 5 min</span></div>', unsafe_allow_html=True)
+
+# ── AR AGING PAGE ──────────────────────────────────────────────
+def show_ar_aging():
+    st.markdown('<div class="section-header">AR Aging Summary</div>', unsafe_allow_html=True)
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        rep_filter = st.selectbox("Filter by Rep", ["All Reps"] + 
+            run_query("SELECT DISTINCT soldBy FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist())
+    with col2:
+        city_filter = st.selectbox("Filter by City", ["All Cities"] + 
+            run_query("SELECT DISTINCT siteCity FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE siteCity IS NOT NULL ORDER BY siteCity")['siteCity'].tolist())
+    with col3:
+        bucket_filter = st.selectbox("Filter by Bucket", ["All Buckets", "Current (0-15)", "Early (16-30)", "Warning (31-45)", "Late (46-60)", "Serious (61-90)", "Collections (90+)"])
+
+    where = ["paymentStatus NOT IN ('PAID','REMITTED')"]
+    if rep_filter != "All Reps": where.append(f"soldBy = '{rep_filter}'")
+    if city_filter != "All Cities": where.append(f"siteCity = '{city_filter}'")
+    if bucket_filter != "All Buckets": where.append(f"agingBucket = '{bucket_filter}'")
+    wc = " AND ".join(where)
+
+    # Summary KPIs
+    try:
+        summary = run_query(f"""
+        SELECT
+          SUM(CASE WHEN agingRank = 1 THEN billableAmount ELSE 0 END) as current_amt,
+          SUM(CASE WHEN agingRank = 2 THEN billableAmount ELSE 0 END) as early_amt,
+          SUM(CASE WHEN agingRank = 3 THEN billableAmount ELSE 0 END) as warning_amt,
+          SUM(CASE WHEN agingRank = 4 THEN billableAmount ELSE 0 END) as late_amt,
+          SUM(CASE WHEN agingRank = 5 THEN billableAmount ELSE 0 END) as serious_amt,
+          SUM(CASE WHEN agingRank = 6 THEN billableAmount ELSE 0 END) as collections_amt,
+          SUM(billableAmount) as total_outstanding
+        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
+        WHERE {wc}
+        """).iloc[0]
+
+        k1,k2,k3,k4,k5,k6,k7 = st.columns(7)
+        k1.markdown(f'<div class="kpi-card" style="border-left:3px solid #34d399"><div class="kpi-label">Current (0-15)</div><div class="kpi-value" style="color:#34d399">{fmt_currency(summary.current_amt)}</div></div>', unsafe_allow_html=True)
+        k2.markdown(f'<div class="kpi-card" style="border-left:3px solid #fbbf24"><div class="kpi-label">Early (16-30)</div><div class="kpi-value" style="color:#fbbf24">{fmt_currency(summary.early_amt)}</div></div>', unsafe_allow_html=True)
+        k3.markdown(f'<div class="kpi-card" style="border-left:3px solid #f97316"><div class="kpi-label">Warning (31-45)</div><div class="kpi-value" style="color:#f97316">{fmt_currency(summary.warning_amt)}</div></div>', unsafe_allow_html=True)
+        k4.markdown(f'<div class="kpi-card" style="border-left:3px solid #ef4444"><div class="kpi-label">Late (46-60)</div><div class="kpi-value" style="color:#ef4444">{fmt_currency(summary.late_amt)}</div></div>', unsafe_allow_html=True)
+        k5.markdown(f'<div class="kpi-card" style="border-left:3px solid #dc2626"><div class="kpi-label">Serious (61-90)</div><div class="kpi-value" style="color:#dc2626">{fmt_currency(summary.serious_amt)}</div></div>', unsafe_allow_html=True)
+        k6.markdown(f'<div class="kpi-card" style="border-left:3px solid #7f1d1d"><div class="kpi-label">Collections (90+)</div><div class="kpi-value" style="color:#f87171">{fmt_currency(summary.collections_amt)}</div></div>', unsafe_allow_html=True)
+        k7.markdown(f'<div class="kpi-card" style="border-left:3px solid #38bdf8"><div class="kpi-label">Total Outstanding</div><div class="kpi-value" style="color:#38bdf8">{fmt_currency(summary.total_outstanding)}</div></div>', unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"AR summary error: {str(e)[:200]}")
+
+    # Detail table
+    st.markdown('<div class="section-header">Order Detail</div>', unsafe_allow_html=True)
+    try:
+        ar = run_query(f"""
+        SELECT
+          retailer as Retailer,
+          siteCity as City,
+          soldBy as Rep,
+          orderNumber as Order,
+          CAST(deliveryDate AS STRING) as Delivered,
+          daysSinceDelivery as Days,
+          agingBucket as Bucket,
+          paymentStatus as Status,
+          retailerCreditRating as Rating,
+          ROUND(billableAmount,2) as Outstanding
+        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
+        WHERE {wc}
+        ORDER BY agingRank DESC, billableAmount DESC
+        """)
+        ar['Outstanding'] = ar['Outstanding'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        st.dataframe(ar, use_container_width=True, height=500)
+    except Exception as e:
+        st.error(f"AR detail error: {str(e)[:200]}")
+# ── AR AGING PAGE ──────────────────────────────────────────────
+def show_ar_aging():
+    st.markdown('<div class="section-header">AR Aging Summary</div>', unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        rep_opts = ["All Reps"] + run_query("SELECT DISTINCT soldBy FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist()
+        rep_filter = st.selectbox("Filter by Rep", rep_opts, key="ar_rep")
+    with col2:
+        city_opts = ["All Cities"] + run_query("SELECT DISTINCT siteCity FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE siteCity IS NOT NULL AND siteCity != '' ORDER BY siteCity")['siteCity'].tolist()
+        city_filter = st.selectbox("Filter by City", city_opts, key="ar_city")
+    with col3:
+        bucket_filter = st.selectbox("Filter by Bucket", ["All Buckets","Current (0-15)","Early (16-30)","Warning (31-45)","Late (46-60)","Serious (61-90)","Collections (90+)"], key="ar_bucket")
+
+    where = ["paymentStatus NOT IN ('PAID','REMITTED')"]
+    if rep_filter != "All Reps": where.append(f"soldBy = '{rep_filter}'")
+    if city_filter != "All Cities": where.append(f"siteCity = '{city_filter}'")
+    if bucket_filter != "All Buckets": where.append(f"agingBucket = '{bucket_filter}'")
+    wc = " AND ".join(where)
+
+    try:
+        s = run_query(f"""
+        SELECT
+          SUM(CASE WHEN agingRank=1 THEN billableAmount ELSE 0 END) as current_amt,
+          SUM(CASE WHEN agingRank=2 THEN billableAmount ELSE 0 END) as early_amt,
+          SUM(CASE WHEN agingRank=3 THEN billableAmount ELSE 0 END) as warning_amt,
+          SUM(CASE WHEN agingRank=4 THEN billableAmount ELSE 0 END) as late_amt,
+          SUM(CASE WHEN agingRank=5 THEN billableAmount ELSE 0 END) as serious_amt,
+          SUM(CASE WHEN agingRank=6 THEN billableAmount ELSE 0 END) as collections_amt,
+          SUM(billableAmount) as total_outstanding
+        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging` WHERE {wc}
+        """).iloc[0]
+        k1,k2,k3,k4,k5,k6,k7 = st.columns(7)
+        k1.markdown(f'<div class="kpi-card" style="border-left:3px solid #34d399"><div class="kpi-label">Current (0-15)</div><div class="kpi-value" style="color:#34d399">{fmt_currency(s.current_amt)}</div></div>', unsafe_allow_html=True)
+        k2.markdown(f'<div class="kpi-card" style="border-left:3px solid #fbbf24"><div class="kpi-label">Early (16-30)</div><div class="kpi-value" style="color:#fbbf24">{fmt_currency(s.early_amt)}</div></div>', unsafe_allow_html=True)
+        k3.markdown(f'<div class="kpi-card" style="border-left:3px solid #f97316"><div class="kpi-label">Warning (31-45)</div><div class="kpi-value" style="color:#f97316">{fmt_currency(s.warning_amt)}</div></div>', unsafe_allow_html=True)
+        k4.markdown(f'<div class="kpi-card" style="border-left:3px solid #ef4444"><div class="kpi-label">Late (46-60)</div><div class="kpi-value" style="color:#ef4444">{fmt_currency(s.late_amt)}</div></div>', unsafe_allow_html=True)
+        k5.markdown(f'<div class="kpi-card" style="border-left:3px solid #dc2626"><div class="kpi-label">Serious (61-90)</div><div class="kpi-value" style="color:#dc2626">{fmt_currency(s.serious_amt)}</div></div>', unsafe_allow_html=True)
+        k6.markdown(f'<div class="kpi-card" style="border-left:3px solid #7f1d1d"><div class="kpi-label">Collections (90+)</div><div class="kpi-value" style="color:#f87171">{fmt_currency(s.collections_amt)}</div></div>', unsafe_allow_html=True)
+        k7.markdown(f'<div class="kpi-card" style="border-left:3px solid #38bdf8"><div class="kpi-label">Total Outstanding</div><div class="kpi-value" style="color:#38bdf8">{fmt_currency(s.total_outstanding)}</div></div>', unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"AR summary error: {str(e)[:200]}")
+
+    st.markdown('<div class="section-header">Order Detail</div>', unsafe_allow_html=True)
+    try:
+        ar = run_query(f"""
+        SELECT retailer as Retailer, siteCity as City, soldBy as Rep,
+          orderNumber as Order, CAST(deliveryDate AS STRING) as Delivered,
+          daysSinceDelivery as Days, agingBucket as Bucket,
+          paymentStatus as Status, retailerCreditRating as Rating,
+          ROUND(billableAmount,2) as Outstanding
+        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
+        WHERE {wc} ORDER BY agingRank DESC, billableAmount DESC
+        """)
+        ar['Outstanding'] = ar['Outstanding'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        st.dataframe(ar, use_container_width=True, height=500)
+    except Exception as e:
+        st.error(f"AR detail error: {str(e)[:200]}")
