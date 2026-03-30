@@ -341,16 +341,21 @@ with tab5:
         st.error(f"AR summary error: {str(e)[:200]}")
 
     try:
+        pivot_where = ["1=1"]
+        if ar_rep != "All Reps": pivot_where.append(f"Rep = '{ar_rep}'")
+        if ar_city != "All Cities": pivot_where.append(f"City = '{ar_city}'")
+        pivot_wc = " AND ".join(pivot_where)
         ar = run_query(f"""
-        SELECT retailer as Retailer, siteCity as City, soldBy as Rep,
-          orderNumber as OrderNum, CAST(deliveryDate AS STRING) as Delivered,
-          daysSinceDelivery as Days, agingBucket as Bucket,
-          paymentStatus as Status, retailerCreditRating as Rating,
-          ROUND(billableAmount,2) as Outstanding
-        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
-        WHERE {ar_wc} ORDER BY agingRank DESC, billableAmount DESC LIMIT 1000
+        SELECT Retailer, City, Rep, Rating, Open_Orders,
+          Current_0_15, Days_16_30, Days_31_45,
+          Days_46_60, Days_61_90, Days_90_Plus,
+          Total_Outstanding, Last_Delivery
+        FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging_pivot`
+        WHERE {pivot_wc}
+        ORDER BY Total_Outstanding DESC
         """)
-        ar['Outstanding'] = ar['Outstanding'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        for c in ['Current_0_15','Days_16_30','Days_31_45','Days_46_60','Days_61_90','Days_90_Plus','Total_Outstanding']:
+            ar[c] = ar[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x > 0 else "-")
         st.dataframe(ar, use_container_width=True, height=500)
     except Exception as e:
         st.error(f"AR detail error: {str(e)[:200]}")
