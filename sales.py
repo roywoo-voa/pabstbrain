@@ -343,12 +343,12 @@ with tab5:
     try:
         ar = run_query(f"""
         SELECT retailer as Retailer, siteCity as City, soldBy as Rep,
-          orderNumber as Order, CAST(deliveryDate AS STRING) as Delivered,
+          orderNumber as OrderNum, CAST(deliveryDate AS STRING) as Delivered,
           daysSinceDelivery as Days, agingBucket as Bucket,
           paymentStatus as Status, retailerCreditRating as Rating,
           ROUND(billableAmount,2) as Outstanding
         FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging`
-        WHERE {ar_wc} ORDER BY agingRank DESC, billableAmount DESC
+        WHERE {ar_wc} ORDER BY agingRank DESC, billableAmount DESC LIMIT 1000
         """)
         ar['Outstanding'] = ar['Outstanding'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(ar, use_container_width=True, height=500)
