@@ -347,14 +347,14 @@ with tab5:
         pivot_wc = " AND ".join(pivot_where)
         ar = run_query(f"""
         SELECT Retailer, City, Rep, Rating, Open_Orders,
-          Current_0_15, Days_16_30, Days_31_45,
-          Days_46_60, Days_61_90, Days_90_Plus,
+          Not_Yet_Due, Days_1_15, Days_16_30,
+          Days_31_60, Days_61_90, Days_91_120, Days_120_Plus,
           Total_Outstanding, Last_Delivery
         FROM `amplified-name-490015-e0.pabst_mis.gold_ar_aging_pivot`
         WHERE {pivot_wc}
         ORDER BY Total_Outstanding DESC
         """)
-        for c in ['Current_0_15','Days_16_30','Days_31_45','Days_46_60','Days_61_90','Days_90_Plus','Total_Outstanding']:
+        for c in ['Not_Yet_Due','Days_1_15','Days_16_30','Days_31_60','Days_61_90','Days_91_120','Days_120_Plus','Total_Outstanding']:
             ar[c] = ar[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x > 0 else "-")
         st.dataframe(ar, use_container_width=True, height=500)
     except Exception as e:
