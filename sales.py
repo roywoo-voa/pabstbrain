@@ -179,6 +179,134 @@ except Exception as e:
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Summary", "Sold By", "SKU Details", "Accts Rev/Gaps", "AR Aging"])
 
+
+with tab1:
+    try:
+        cd = run_query(f"""
+        SELECT deliveryDate,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as st_ides,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as pbr,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN lineItemSubtotalAfterDiscount ELSE 0 END),2) as nyf,
+            COUNT(DISTINCT orderNumber) as orders,
+            ROUND(SUM(grossRevenue - netRevenue),2) as disc
+        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+        WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate
+        """)
+        fig = go.Figure()
+        for col, clr, lbl in [('st_ides','#38bdf8','St Ides'),('pbr','#818cf8','PBR'),('nyf','#a78bfa','NYF')]:
+            fig.add_trace(go.Bar(name=lbl, x=cd['deliveryDate'], y=cd[col], marker_color=clr, opacity=0.9))
+        fig.update_layout(barmode='stack', paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
+            font=dict(family='DM Mono', color='#94a3b8', size=10),
+            legend=dict(orientation='h', yanchor='top', y=-0.15, xanchor='center', x=0.5, bgcolor='rgba(0,0,0,0)'),
+            margin=dict(l=0,r=0,t=10,b=0), height=280,
+            xaxis=dict(gridcolor='#1e2d4a', showgrid=False),
+            yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e: st.error(f"Chart error: {str(e)[:200]}")
+
+    st.markdown('<div class="section-header">Daily Detail</div>', unsafe_allow_html=True)
+    try:
+        dd = run_query(f"""
+        SELECT deliveryDate as Date,
+            ROUND(SUM(grossRevenue),2) as Gross,
+            ROUND(SUM(lineItemSubtotal),2) as Invoiced,
+            ROUND(SUM(CASE WHEN isPennyOut THEN grossRevenue ELSE 0 END),2) as Penny_Out,
+            ROUND(SUM(grossRevenue - netRevenue),2) as Discount,
+            ROUND(SUM(netRevenue),2) as Net,
+            COUNT(DISTINCT orderNumber) as Orders,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%ST IDES%' OR skuName LIKE '%ST IDES%' OR brandName LIKE '%Pabst%' THEN netRevenue ELSE 0 END),2) as St_Ides,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%PBR%' OR skuName LIKE '%PBR%' THEN netRevenue ELSE 0 END),2) as PBR,
+            ROUND(SUM(CASE WHEN skuDisplayName LIKE '%NYF%' OR skuName LIKE '%NYF%' THEN netRevenue ELSE 0 END),2) as NYF
+        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+        WHERE {wc} GROUP BY deliveryDate ORDER BY deliveryDate DESC
+        """)
+        for c in ['Gross','Invoiced','Penny_Out','Discount','Net','St_Ides','PBR','NYF']:
+            if c in dd.columns:
+                dd[c] = dd[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        st.dataframe(dd, use_container_width=True, height=300)
+    except Exception as e: st.error(f"Daily detail error: {str(e)[:200]}")
+
+with tab2:
+    try:
+        sb = run_query(f"""
+        SELECT soldBy as Sales_Rep, COUNT(DISTINCT retailerId) as Accts, COUNT(DISTINCT orderNumber) as Orders,
+            SUM(units) as Units,
+            ROUND(SUM(lineItemSubtotal),2) as Gross_Rev,
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
+            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Net_Rev,
+            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT retailerId),0),2) as avg_acct,
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount)/NULLIF(SUM(lineItemSubtotal),0)*100,1) as `Disc%`
+        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+        WHERE {wc} GROUP BY soldBy ORDER BY Net_Rev DESC
+        """)
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(x=sb['Sales_Rep'], y=sb['Net_Rev'], marker_color='#38bdf8', opacity=0.85,
+            text=[fmt_currency(v) for v in sb['Net_Rev']], textposition='outside',
+            textfont=dict(family='DM Mono', size=9, color='#94a3b8')))
+        fig2.update_layout(paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
+            font=dict(family='DM Mono', color='#94a3b8', size=10),
+            margin=dict(l=0,r=0,t=30,b=60), height=260,
+            xaxis=dict(gridcolor='#1e2d4a', tickangle=-30),
+            yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'))
+        st.plotly_chart(fig2, use_container_width=True)
+        disp = sb.copy()
+        for c in ['Gross_Rev','Discounts','Net_Rev','avg_acct']:
+            disp[c] = disp[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
+        disp['Disc%'] = disp['Disc%'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
+        st.dataframe(disp, use_container_width=True, height=350)
+    except Exception as e:
+        st.info(f"Loading... {str(e)[:60]}")
+
+with tab3:
+    try:
+        sku = run_query(f"""
+        SELECT skuName as Product, COUNT(DISTINCT retailerId) as Accts, SUM(units) as Units,
+            ROUND(SUM(units)/NULLIF(COUNT(DISTINCT retailerId),0),1) as Velocity,
+            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
+            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(SUM(units),0),2) as avg_sale,
+            ROUND(SUM(lineItemSubtotal)/NULLIF(SUM(units),0),2) as Target
+        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+        WHERE {wc} GROUP BY skuName ORDER BY Revenue DESC
+        """)
+        d = sku.copy()
+        for c in ['Revenue','avg_sale','Target']:
+            d[c] = d[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
+        d['Velocity'] = d['Velocity'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else '0')
+        st.dataframe(d, use_container_width=True, height=500)
+    except Exception as e:
+        st.info(f"Loading... {str(e)[:60]}")
+
+with tab4:
+    try:
+        ac = run_query(f"""
+        SELECT retailer as Retailer, siteCity as City, soldBy as Sales_Rep,
+            retailerCreditRating as `Credit Rating`,
+            COUNT(DISTINCT orderNumber) as Orders, SUM(units) as Units,
+            ROUND(SUM(lineItemSubtotalAfterDiscount),2) as Revenue,
+            ROUND(SUM(grossRevenue - lineItemSubtotalAfterDiscount),2) as Discounts,
+            ROUND(SUM(lineItemSubtotalAfterDiscount)/NULLIF(COUNT(DISTINCT orderNumber),0),2) as `Avg Order`,
+            CAST(MAX(deliveryDate) AS STRING) as `Last Delivery`
+        FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+        WHERE {wc} GROUP BY retailer,siteCity,soldBy,retailerCreditRating ORDER BY Revenue DESC
+        """)
+        a1,a2,a3,a4 = st.columns(4)
+        a1.metric("Total Accounts", fmt_number(len(ac)))
+        a2.metric("Avg Rev/Acct", fmt_currency(ac['Revenue'].mean()))
+        a3.metric("Top Account", fmt_currency(ac['Revenue'].max()))
+        a4.metric("Accts < $500", fmt_number((ac['Revenue'] < 500).sum()))
+        d = ac.copy()
+        for c in ['Revenue','Discounts','Avg Order']:
+            d[c] = d[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
+        st.dataframe(d, use_container_width=True, height=450)
+    except Exception as e:
+        st.info(f"Loading... {str(e)[:60]}")
+
+with tab5:
+    show_ar_aging()
+
+st.markdown(f'<div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;display:flex;justify-content:space-between"><span>PABSTBRAIN v1.0</span><span>{start_date} → {end_date}</span><span>Refreshes every 5 min</span></div>', unsafe_allow_html=True)
+
+
 with tab1:
     try:
         cd = run_query(f"""
