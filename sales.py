@@ -376,7 +376,7 @@ with tab6:
     if si_acct != "Select Account":
         try:
             acct_sum = run_query(f"""
-            SELECT MAX(soldBy) as rep, MAX(siteCity) as city, MAX(siteZip) as zip,
+            SELECT MAX(soldBy) as rep, MAX(siteCity) as city, MAX(siteCity) as city,
               MAX(paymentTerms) as terms, MAX(retailerCreditRating) as rating,
               COUNT(DISTINCT orderNumber) as total_orders,
               ROUND(SUM(netRevenue),2) as lifetime_revenue,
@@ -401,10 +401,10 @@ with tab6:
             WITH ranked AS (
               SELECT skuName, orderNumber, CAST(deliveryDate AS STRING) as deliveryDate,
                 SUM(units) as units, ROUND(AVG(pricePerUnit),2) as price,
-                ROW_NUMBER() OVER (PARTITION BY skuName ORDER BY deliveryDate DESC) as rn
+                ROW_NUMBER() OVER (PARTITION BY skuName ORDER BY MAX(deliveryDate) DESC) as rn
               FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
               WHERE retailer = '{si_acct}'
-              GROUP BY skuName, orderNumber, deliveryDate
+              GROUP BY skuName, orderNumber
             )
             SELECT skuName as SKU,
               MAX(CASE WHEN rn=1 THEN deliveryDate END) as Inv1_Date,
