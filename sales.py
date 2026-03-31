@@ -177,7 +177,7 @@ except Exception as e:
     st.warning(f"Waiting for data... {str(e)[:80]}")
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Summary", "Sold By", "SKU Details", "Accts Rev/Gaps", "AR Aging"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Summary", "Sold By", "SKU Details", "Accts Rev/Gaps", "AR Aging", "Store Intel"])
 
 with tab1:
     try:
@@ -354,7 +354,7 @@ with tab5:
         WHERE {pivot_wc}
         ORDER BY Total_Outstanding DESC
         """)
-        for c in ['Not_Yet_Due','Days_1_15','Days_16_30','Days_31_60','Days_61_90','Days_91_120','Days_120_Plus','Total_Outstanding']:
+        for c in ['Not_Yet_Due','Days_1_15','Days_16_30','Days_31_60','Days_61_90','Days_91_120','Days_120_Plus','Total_Outstanding','Write_Off']:
             ar[c] = ar[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x > 0 else "-")
         st.dataframe(ar, use_container_width=True, height=500)
     except Exception as e:
