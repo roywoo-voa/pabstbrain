@@ -354,7 +354,7 @@ with tab5:
         WHERE {pivot_wc}
         ORDER BY Total_Outstanding DESC
         """)
-        for c in ['Not_Yet_Due','Days_1_15','Days_16_30','Days_31_60','Days_61_90','Days_91_120','Days_120_Plus','Total_Outstanding','Write_Off']:
+        for c in ['Not_Yet_Due','Days_1_15','Days_16_30','Days_31_60','Days_61_90','Days_91_120','Days_120_Plus','Total_Outstanding']:
             ar[c] = ar[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x > 0 else "-")
         st.dataframe(ar, use_container_width=True, height=500)
     except Exception as e:
