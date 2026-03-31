@@ -360,4 +360,122 @@ with tab5:
     except Exception as e:
         st.error(f"AR detail error: {str(e)[:200]}")
 
+with tab6:
+    st.markdown('<div class="section-header">Store Intelligence</div>', unsafe_allow_html=True)
+    st.caption("Select a rep and account to see purchase history and order recommendations.")
+    si_col1, si_col2 = st.columns(2)
+    with si_col1:
+        si_rep = st.selectbox("Sales Rep", ["All Reps"] + run_query("SELECT DISTINCT soldBy FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders` WHERE soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist(), key="si_rep")
+    with si_col2:
+        if si_rep != "All Reps":
+            acct_q = f"SELECT DISTINCT retailer FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders` WHERE soldBy = '{si_rep}' ORDER BY retailer"
+        else:
+            acct_q = "SELECT DISTINCT retailer FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders` ORDER BY retailer"
+        si_acct = st.selectbox("Account", ["Select Account"] + run_query(acct_q)['retailer'].tolist(), key="si_acct")
+
+    if si_acct != "Select Account":
+        try:
+            acct_sum = run_query(f"""
+            SELECT MAX(soldBy) as rep, MAX(siteCity) as city, MAX(siteZip) as zip,
+              MAX(paymentTerms) as terms, MAX(retailerCreditRating) as rating,
+              COUNT(DISTINCT orderNumber) as total_orders,
+              ROUND(SUM(netRevenue),2) as lifetime_revenue,
+              ROUND(AVG(netRevenue),2) as avg_order,
+              MAX(CAST(deliveryDate AS STRING)) as last_order,
+              MAX(paymentStatus) as payment_status
+            FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+            WHERE retailer = '{si_acct}'
+            """).iloc[0]
+            a1,a2,a3,a4,a5 = st.columns(5)
+            a1.markdown(f'''<div class="kpi-card"><div class="kpi-label">Lifetime Revenue</div><div class="kpi-value">{fmt_currency(acct_sum.lifetime_revenue)}</div></div>''', unsafe_allow_html=True)
+            a2.markdown(f'''<div class="kpi-card"><div class="kpi-label">Total Orders</div><div class="kpi-value">{fmt_number(acct_sum.total_orders)}</div></div>''', unsafe_allow_html=True)
+            a3.markdown(f'''<div class="kpi-card"><div class="kpi-label">Avg Order</div><div class="kpi-value">{fmt_currency(acct_sum.avg_order)}</div></div>''', unsafe_allow_html=True)
+            a4.markdown(f'''<div class="kpi-card"><div class="kpi-label">Last Order</div><div class="kpi-value" style="font-size:0.9rem">{acct_sum.last_order or "N/A"}</div></div>''', unsafe_allow_html=True)
+            a5.markdown(f'''<div class="kpi-card"><div class="kpi-label">Terms | Rating</div><div class="kpi-value" style="font-size:0.9rem">{acct_sum.terms or "N/A"} | {acct_sum.rating or "N/A"}</div></div>''', unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Account summary error: {str(e)[:150]}")
+
+        st.markdown('<div class="section-header">SKU Purchase History</div>', unsafe_allow_html=True)
+        try:
+            sku_hist = run_query(f"""
+            WITH ranked AS (
+              SELECT skuName, orderNumber, CAST(deliveryDate AS STRING) as deliveryDate,
+                SUM(units) as units, ROUND(AVG(pricePerUnit),2) as price,
+                ROW_NUMBER() OVER (PARTITION BY skuName ORDER BY deliveryDate DESC) as rn
+              FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+              WHERE retailer = '{si_acct}'
+              GROUP BY skuName, orderNumber, deliveryDate
+            )
+            SELECT skuName as SKU,
+              MAX(CASE WHEN rn=1 THEN deliveryDate END) as Inv1_Date,
+              MAX(CASE WHEN rn=1 THEN units END) as Inv1_Units,
+              MAX(CASE WHEN rn=1 THEN price END) as Inv1_Price,
+              MAX(CASE WHEN rn=2 THEN deliveryDate END) as Inv2_Date,
+              MAX(CASE WHEN rn=2 THEN units END) as Inv2_Units,
+              MAX(CASE WHEN rn=2 THEN price END) as Inv2_Price,
+              MAX(CASE WHEN rn=3 THEN deliveryDate END) as Inv3_Date,
+              MAX(CASE WHEN rn=3 THEN units END) as Inv3_Units,
+              MAX(CASE WHEN rn=3 THEN price END) as Inv3_Price,
+              MAX(CASE WHEN rn=4 THEN deliveryDate END) as Inv4_Date,
+              MAX(CASE WHEN rn=4 THEN units END) as Inv4_Units,
+              MAX(CASE WHEN rn=4 THEN price END) as Inv4_Price,
+              MAX(CASE WHEN rn=5 THEN deliveryDate END) as Inv5_Date,
+              MAX(CASE WHEN rn=5 THEN units END) as Inv5_Units,
+              MAX(CASE WHEN rn=5 THEN price END) as Inv5_Price,
+              COUNT(*) as Total_Orders,
+              ROUND(AVG(units),0) as Avg_Units
+            FROM ranked GROUP BY skuName
+            ORDER BY Inv1_Date DESC NULLS LAST
+            """)
+            st.dataframe(sku_hist, use_container_width=True, height=300)
+        except Exception as e:
+            st.error(f"SKU history error: {str(e)[:150]}")
+
+        st.markdown('<div class="section-header">Order Recommendations</div>', unsafe_allow_html=True)
+        try:
+            zip_code = run_query(f"SELECT MAX(siteZip) as zip FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders` WHERE retailer = '{si_acct}'").iloc[0]['zip'] or '00000'
+            recs = run_query(f"""
+            WITH acct_skus AS (
+              SELECT skuName, MAX(deliveryDate) as last_ordered,
+                COUNT(DISTINCT orderNumber) as times_ordered,
+                ROUND(AVG(units),0) as avg_units
+              FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+              WHERE retailer = '{si_acct}'
+              GROUP BY skuName
+            ),
+            all_skus AS (
+              SELECT DISTINCT skuName FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+            ),
+            zip_perf AS (
+              SELECT skuName, COUNT(DISTINCT retailer) as zip_accounts,
+                ROUND(AVG(units),0) as zip_avg_units
+              FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
+              WHERE siteZip = '{zip_code}' AND retailer != '{si_acct}'
+                AND deliveryDate >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+              GROUP BY skuName
+            )
+            SELECT s.skuName as SKU,
+              COALESCE(a.times_ordered,0) as Times_Ordered,
+              COALESCE(a.avg_units,0) as Avg_Units,
+              CAST(a.last_ordered AS STRING) as Last_Ordered,
+              COALESCE(z.zip_accounts,0) as Nearby_Accounts,
+              COALESCE(z.zip_avg_units,0) as Nearby_Avg_Units,
+              CASE
+                WHEN a.skuName IS NULL AND z.zip_accounts > 0 THEN '🆕 New Opportunity'
+                WHEN a.skuName IS NOT NULL AND DATE_DIFF(CURRENT_DATE(),a.last_ordered,DAY) <= 30 THEN '✅ Reorder'
+                WHEN a.skuName IS NOT NULL AND DATE_DIFF(CURRENT_DATE(),a.last_ordered,DAY) <= 60 THEN '🔄 Re-engage'
+                WHEN a.skuName IS NOT NULL AND DATE_DIFF(CURRENT_DATE(),a.last_ordered,DAY) > 60 THEN '⚠️ Lapsed'
+                ELSE '📋 Review'
+              END as Recommendation
+            FROM all_skus s
+            LEFT JOIN acct_skus a ON s.skuName = a.skuName
+            LEFT JOIN zip_perf z ON s.skuName = z.skuName
+            WHERE z.zip_accounts > 0 OR a.skuName IS NOT NULL
+            ORDER BY CASE WHEN a.skuName IS NULL THEN 1 ELSE 0 END, z.zip_accounts DESC
+            LIMIT 50
+            """)
+            st.dataframe(recs, use_container_width=True, height=400)
+        except Exception as e:
+            st.error(f"Recommendations error: {str(e)[:150]}")
+
 st.markdown(f'<div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;display:flex;justify-content:space-between"><span>PABSTBRAIN v1.0</span><span>{start_date} → {end_date}</span><span>Refreshes every 5 min</span></div>', unsafe_allow_html=True)
