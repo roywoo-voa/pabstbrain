@@ -399,7 +399,7 @@ with tab6:
         try:
             sku_hist = run_query(f"""
             WITH ranked AS (
-              SELECT skuName, orderNumber, CAST(deliveryDate AS STRING) as deliveryDate,
+              SELECT skuName, orderNumber, CAST(MAX(deliveryDate) AS STRING) as deliveryDate,
                 SUM(units) as units, ROUND(AVG(pricePerUnit),2) as price,
                 ROW_NUMBER() OVER (PARTITION BY skuName ORDER BY MAX(deliveryDate) DESC) as rn
               FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
@@ -433,7 +433,7 @@ with tab6:
 
         st.markdown('<div class="section-header">Order Recommendations</div>', unsafe_allow_html=True)
         try:
-            zip_code = run_query(f"SELECT MAX(siteZip) as zip FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders` WHERE retailer = '{si_acct}'").iloc[0]['zip'] or '00000'
+            city_code = run_query(f"SELECT MAX(siteCity) as city FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders` WHERE retailer = '{si_acct}'").iloc[0]['city'] or 'Unknown'
             recs = run_query(f"""
             WITH acct_skus AS (
               SELECT skuName, MAX(deliveryDate) as last_ordered,
@@ -450,7 +450,7 @@ with tab6:
               SELECT skuName, COUNT(DISTINCT retailer) as zip_accounts,
                 ROUND(AVG(units),0) as zip_avg_units
               FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-              WHERE siteZip = '{zip_code}' AND retailer != '{si_acct}'
+              WHERE siteCity = '{city_code}' AND retailer != '{si_acct}'
                 AND deliveryDate >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
               GROUP BY skuName
             )
