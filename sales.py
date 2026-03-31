@@ -403,7 +403,7 @@ with tab6:
                 SUM(units) as units, ROUND(AVG(pricePerUnit),2) as price,
                 ROW_NUMBER() OVER (PARTITION BY skuName ORDER BY MAX(deliveryDate) DESC) as rn
               FROM `amplified-name-490015-e0.pabst_mis.silver_nabis_orders`
-              WHERE retailer = '{si_acct}'
+              WHERE retailer = '{si_acct}' AND isPennyOut = FALSE
               GROUP BY skuName, orderNumber
             )
             SELECT skuName as SKU,
@@ -427,7 +427,7 @@ with tab6:
             FROM ranked GROUP BY skuName
             ORDER BY Inv1_Date DESC NULLS LAST
             """)
-            st.dataframe(sku_hist, use_container_width=True, height=300)
+            st.dataframe(sku_hist, use_container_width=True, height=600)
         except Exception as e:
             st.error(f"SKU history error: {str(e)[:150]}")
 
