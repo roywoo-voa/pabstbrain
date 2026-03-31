@@ -16,6 +16,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; background-colo
 .stButton > button { background: #111827 !important; color: #94a3b8 !important; border: 1px solid #1e2d4a !important; border-radius: 4px !important; font-size: 0.72rem !important; font-family: 'DM Mono', monospace !important; padding: 0.3rem 0.75rem !important; }
 .stButton > button:hover { background: #1e2d4a !important; color: #38bdf8 !important; border-color: #38bdf8 !important; }
 .kpi-card { background: #111827; border: 1px solid #1e2d4a; border-radius: 6px; padding: 0.75rem 1rem; }
+@media (max-width: 768px) { .kpi-card { padding: 0.5rem !important; } .kpi-value { font-size: 1rem !important; } }
 .kpi-label { font-size: 0.65rem; color: #475569; font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.25rem; }
 .kpi-value { font-size: 1.3rem; font-weight: 700; color: #f1f5f9; font-family: 'DM Mono', monospace; line-height: 1; }
 .kpi-sub { font-size: 0.65rem; color: #64748b; font-family: 'DM Mono', monospace; margin-top: 0.2rem; }
