@@ -160,10 +160,10 @@ try:
 
     k1,k2,k3,k4,k5,k6,k7,k8,k9 = st.columns(9)
     k1.markdown(f'<div class="kpi-card"><div class="kpi-label">Gross (List)</div><div class="kpi-value">{fmt_currency(s.gross)}</div></div>', unsafe_allow_html=True)
-    k2.markdown(f'<div class="kpi-card"><div class="kpi-label">Invoiced Total</div><div class="kpi-value">{fmt_currency(s.invoiced)}</div></div>', unsafe_allow_html=True)
-    k3.markdown(f'<div class="kpi-card"><div class="kpi-label">Total Discount</div><div class="kpi-value kpi-negative">{fmt_currency(s.disc)}</div></div>', unsafe_allow_html=True)
+    k2.markdown(f'<div class="kpi-card"><div class="kpi-label">Revenue</div><div class="kpi-value">{fmt_currency(s.invoiced)}</div></div>', unsafe_allow_html=True)
+    k3.markdown(f'<div class="kpi-card"><div class="kpi-label">Discounted</div><div class="kpi-value kpi-negative">{fmt_currency(s.disc)}</div></div>', unsafe_allow_html=True)
     k4.markdown(f'<div class="kpi-card"><div class="kpi-label">Penny-Out Promos</div><div class="kpi-value kpi-negative">{fmt_currency(s.penny_out)}</div></div>', unsafe_allow_html=True)
-    k5.markdown(f'<div class="kpi-card"><div class="kpi-label">Net Revenue</div><div class="kpi-value kpi-positive">{fmt_currency(s.net)}</div></div>', unsafe_allow_html=True)
+    k5.markdown(f'<div class="kpi-card"><div class="kpi-label">Net</div><div class="kpi-value kpi-positive">{fmt_currency(s.net)}</div></div>', unsafe_allow_html=True)
     k6.markdown(f'<div class="kpi-card"><div class="kpi-label">Orders</div><div class="kpi-value kpi-neutral">{fmt_number(s.orders)}</div></div>', unsafe_allow_html=True)
     k7.markdown(f'<div class="kpi-card"><div class="kpi-label">Active Accts</div><div class="kpi-value">{fmt_number(s.accts)}</div><div class="kpi-sub">Avg {fmt_currency(s.avg_acct)}</div></div>', unsafe_allow_html=True)
     k8.markdown(f'<div class="kpi-card"><div class="kpi-label">Accts &lt;$1K</div><div class="kpi-value kpi-negative">{fmt_number(s.under1k)}</div></div>', unsafe_allow_html=True)
