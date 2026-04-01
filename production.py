@@ -127,11 +127,17 @@ st.divider()
 st.subheader("Avg Production Cost / Unit by Month")
 
 cost_trend = (
-    filtered[filtered["avg_cost_per_unit"] > 0]
-    .groupby(["production_month_key", "brand"])["avg_cost_per_unit"]
-    .mean()
+    filtered[filtered["clean_units"] > 0]
+    .groupby(["production_month_key", "brand"])
+    .agg(
+        total_cost=("total_materials_cost", "sum"),
+        total_units=("clean_units", "sum")
+    )
     .reset_index()
     .sort_values("production_month_key")
+)
+cost_trend["avg_cost_per_unit"] = (
+    cost_trend["total_cost"] / cost_trend["total_units"]
 )
 
 if not cost_trend.empty:
