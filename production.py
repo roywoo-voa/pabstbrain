@@ -240,7 +240,6 @@ if current_month == prior_month:
 current = sku_df[sku_df["month"] == current_month].copy()
 prior = sku_df[sku_df["month"] == prior_month].copy()
 
-# Build historical baseline for z-score
 history = sku_df.groupby("sku").agg(
     cpu_mean=("weighted_cpu", "mean"),
     cpu_std=("weighted_cpu", "std")
@@ -320,23 +319,103 @@ valid_prior = merged[
     (merged["weighted_cpu_prior"] > 0)
 ].copy()
 
-st.markdown("**Top 5 Cost Increases (by $ Impact)**")
-top_increases = valid_prior.nlargest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
-top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
-top_increases["CPU (Current)"] = top_increases["CPU (Current)"].map("${:.4f}".format)
-top_increases["CPU (Prior)"] = top_increases["CPU (Prior)"].map("${:.4f}".format)
-top_increases["Δ %"] = top_increases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
-top_increases["$ Impact"] = top_increases["$ Impact"].map("${:+,.0f}".format)
-st.dataframe(top_increases, use_container_width=True, hide_index=True)
+col_inc, col_dec = st.columns(2)
 
-st.markdown("**Top 5 Cost Decreases (by $ Impact)**")
-top_decreases = valid_prior.nsmallest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
-top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
-top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".format)
-top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
-top_decreases["Δ %"] = top_decreases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
-top_decreases["$ Impact"] = top_decreases["$ Impact"].map("${:+,.0f}".format)
-st.dataframe(top_decreases, use_container_width=True, hide_index=True)
+with col_inc:
+    st.markdown("**Top 5 Cost Increases (by $ Impact)**")
+    top_increases = valid_prior.nlargest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
+    top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
+    top_increases["CPU (Current)"] = top_increases["CPU (Current)"].map("${:.4f}".format)
+    top_increases["CPU (Prior)"] = top_increases["CPU (Prior)"].map("${:.4f}".format)
+    top_increases["Δ %"] = top_increases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
+    top_increases["$ Impact"] = top_increases["$ Impact"].map("${:+,.0f}".format)
+    st.dataframe(top_increases, use_container_width=True, hide_index=True)
+
+with col_dec:
+    st.markdown("**Top 5 Cost Decreases (by $ Impact)**")
+    top_decreases = valid_prior.nsmallest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
+    top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
+    top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".format)
+    top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
+    top_decreases["Δ %"] = top_decreases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
+    top_decreases["$ Impact"] = top_decreases["$ Impact"].map("${:+,.0f}".format)
+    st.dataframe(top_decreases, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# ── SKU Drilldown ─────────────────────────────────────────────────────────────
+st.subheader("🔍 SKU Drilldown")
+
+drill_source = st.radio(
+    "Select SKU from:",
+    ["Top 5 Increases", "Top 5 Decreases", "All SKUs"],
+    horizontal=True
+)
+
+if drill_source == "Top 5 Increases":
+    drill_options = valid_prior.nlargest(5, "impact")["sku"].tolist()
+elif drill_source == "Top 5 Decreases":
+    drill_options = valid_prior.nsmallest(5, "impact")["sku"].tolist()
+else:
+    drill_options = sorted(merged["sku"].unique().tolist())
+
+if drill_options:
+    selected_sku = st.selectbox("Select SKU", drill_options)
+
+    sku_row = merged[merged["sku"] == selected_sku].iloc[0] if not merged[merged["sku"] == selected_sku].empty else None
+
+    if sku_row is not None:
+        d1, d2, d3, d4, d5 = st.columns(5)
+        d1.metric("Brand", sku_row["brand"])
+        d2.metric("CPU (Current)", f"${sku_row['weighted_cpu_current']:.4f}")
+        d3.metric("CPU (Prior)", f"${sku_row['weighted_cpu_prior']:.4f}" if pd.notna(sku_row['weighted_cpu_prior']) else "N/A")
+        d4.metric("Z-Score", f"{sku_row['z_score']:.2f}")
+        d5.metric("Anomaly", sku_row["cost_flag_anomaly"])
+
+        # Monthly trend for selected SKU
+        sku_history = sku_df[sku_df["sku"] == selected_sku].sort_values("month")
+        if not sku_history.empty:
+            fig_drill = px.line(
+                sku_history,
+                x="month",
+                y="weighted_cpu",
+                markers=True,
+                labels={"month": "Month", "weighted_cpu": "Weighted CPU ($)"},
+                title=f"Monthly Cost Trend — {selected_sku}"
+            )
+            fig_drill.update_layout(
+                xaxis_tickangle=-45,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)"
+            )
+            st.plotly_chart(fig_drill, use_container_width=True)
+
+        # Batch detail for selected SKU — current and prior months
+        sku_batches = silver[
+            (silver["Item_Name"] == selected_sku) &
+            (silver["completed_date"].astype(str).str[:7].isin([current_month, prior_month]))
+        ].copy()
+
+        if not sku_batches.empty:
+            sku_batches["month"] = sku_batches["completed_date"].astype(str).str[:7]
+            batch_display = sku_batches[[
+                "Batch_Number", "month", "completed_date",
+                "units_produced", "cost_per_unit", "materials_cost",
+                "cost_flag", "Location"
+            ]].copy()
+            batch_display.columns = [
+                "Batch", "Month", "Completed",
+                "Units", "Cost/Unit", "Materials Cost",
+                "Flag", "Location"
+            ]
+            batch_display["Units"] = batch_display["Units"].map("{:,.0f}".format)
+            batch_display["Cost/Unit"] = batch_display["Cost/Unit"].map("${:.4f}".format)
+            batch_display["Materials Cost"] = batch_display["Materials Cost"].map("${:,.0f}".format)
+            batch_display = batch_display.sort_values("Completed", ascending=False)
+            st.markdown(f"**Batch Detail — {selected_sku} ({prior_month} & {current_month})**")
+            st.dataframe(batch_display, use_container_width=True, hide_index=True)
+        else:
+            st.info("No batch detail available for this SKU in the selected months.")
 
 st.divider()
 
@@ -355,17 +434,14 @@ if not anomalies.empty:
         "z_score",
         "cost_flag_anomaly"
     ]].copy()
-
     anomalies_display.columns = [
         "SKU", "Brand",
         "CPU (Current)", "CPU (Historical Avg)",
         "Z-Score", "Flag"
     ]
-
     anomalies_display["CPU (Current)"] = anomalies_display["CPU (Current)"].map("${:.4f}".format)
     anomalies_display["CPU (Historical Avg)"] = anomalies_display["CPU (Historical Avg)"].map("${:.4f}".format)
     anomalies_display["Z-Score"] = anomalies_display["Z-Score"].map("{:.2f}".format)
-
     st.dataframe(anomalies_display, use_container_width=True, hide_index=True)
 else:
     st.success("No cost anomalies detected for the selected period and filters.")
