@@ -180,3 +180,74 @@ brand_summary.columns = ["Brand", "Product Line", "Batches", "Units Produced", "
 st.dataframe(brand_summary, use_container_width=True, hide_index=True)
 
 st.divider()
+# ── Batch Detail ──────────────────────────────────────────────────────────────
+st.subheader("Batch Detail")
+
+@st.cache_data(ttl=3600)
+def load_silver():
+    query = """
+        SELECT
+            Batch_Number,
+            Item_Name,
+            brand,
+            product_line,
+            completed_date,
+            units_produced,
+            cost_per_unit,
+            materials_cost,
+            cost_flag,
+            Location
+        FROM `pabst_mis.silver_production`
+        ORDER BY completed_date DESC
+    """
+    return client.query(query).to_dataframe()
+
+silver = load_silver()
+
+# Apply same filters to silver
+silver_filtered = silver.copy()
+if selected_brand != "All Brands":
+    silver_filtered = silver_filtered[silver_filtered["brand"] == selected_brand]
+if selected_line != "All Product Lines":
+    silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
+if selected_year != "All Years":
+    silver_filtered = silver_filtered[
+        silver_filtered["completed_date"].astype(str).str[:4] == str(selected_year)
+    ]
+
+# Format for display
+display = silver_filtered[[
+    "Batch_Number", "Item_Name", "brand", "product_line",
+    "completed_date", "units_produced", "cost_per_unit", "materials_cost", "cost_flag"
+]].copy()
+
+display.columns = [
+    "Batch", "Product", "Brand", "Product Line",
+    "Completed", "Units", "Cost/Unit", "Materials Cost", "Flag"
+]
+
+display["Units"] = display["Units"].map("{:,.0f}".format)
+display["Cost/Unit"] = display["Cost/Unit"].map("${:.4f}".format)
+display["Materials Cost"] = display["Materials Cost"].map("${:,.0f}".format)
+
+st.dataframe(display, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# ── Data Quality Panel ────────────────────────────────────────────────────────
+with st.expander("📊 Data Quality & Audit Trail"):
+    st.markdown("**Source:** Roshi `ProductionBatchPerformanceDetail`")
+    st.markdown("**Deduplication:** One row per Package Tag (state compliance ID), most recent export kept")
+    st.markdown("**Corrections applied:** 33 batches corrected per Jason West (Roshi CTO), March 11–13 2026")
+    st.markdown("**Destroyed batch excluded:** PL-MN036 (1 unit produced, immediately destroyed per Mario)")
+    st.markdown("**Estimated cost batch:** PL-CL021 — Cherry Limeade Soda, $0.4917/unit (avg of 21 clean batches, pending Jason confirmation)")
+    st.markdown("**Cost data reliable:** Jan 2024 – Sep 2025. Oct 2025–present pending Roshi correction.")
+    st.markdown("**Zero cost batches:** 101 pre-2024 batches — units visible, cost not available")
+
+    flag_summary = silver.groupby("cost_flag").agg(
+        batches=("Batch_Number", "count"),
+        units=("units_produced", "sum")
+    ).reset_index()
+    flag_summary.columns = ["Cost Flag", "Batches", "Units"]
+    flag_summary["Units"] = flag_summary["Units"].map("{:,.0f}".format)
+    st.dataframe(flag_summary, use_container_width=True, hide_index=True)
