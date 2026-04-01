@@ -216,8 +216,15 @@ silver = load_silver()
 
 # Apply same filters to silver
 silver["year"] = pd.to_datetime(silver["completed_date"]).dt.year
+silver_filtered = silver.copy()
 if selected_brand != "All Brands":
     silver_filtered = silver_filtered[silver_filtered["brand"] == selected_brand]
+if selected_line != "All Product Lines":
+    silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
+if selected_year != "All Years":
+    silver_filtered = silver_filtered[
+        silver_filtered["year"] == int(selected_year)
+    ]
 if selected_line != "All Product Lines":
     silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
 if selected_year != "All Years":
