@@ -238,12 +238,20 @@ if current_month == prior_month:
 current = sku_df[sku_df["month"] == current_month].copy()
 prior = sku_df[sku_df["month"] == prior_month].copy()
 
+# Build historical baseline for z-score
+history = sku_df.groupby("sku").agg(
+    cpu_mean=("weighted_cpu", "mean"),
+    cpu_std=("weighted_cpu", "std")
+).reset_index()
+
 merged = current.merge(
     prior[["sku", "brand", "clean_units", "materials_cost", "weighted_cpu"]],
     on=["sku", "brand"],
     suffixes=("_current", "_prior"),
     how="left"
 )
+
+merged = merged.merge(history, on="sku", how="left")
 
 merged = merged[
     (merged["clean_units_current"] > 100) |
@@ -257,6 +265,17 @@ merged["delta_pct"] = np.where(
     0
 ).round(2)
 
+merged["z_score"] = np.where(
+    merged["cpu_std"] > 0,
+    (merged["weighted_cpu_current"] - merged["cpu_mean"]) / merged["cpu_std"],
+    0
+)
+
+merged["cost_flag_anomaly"] = np.where(
+    merged["z_score"] > 2, "🚨 Spike",
+    np.where(merged["z_score"] < -2, "✅ Drop", "Normal")
+)
+
 if selected_brand != "All Brands":
     merged = merged[merged["brand"] == selected_brand]
 if selected_line != "All Product Lines":
@@ -267,7 +286,7 @@ mom_display = merged[[
     "clean_units_current", "weighted_cpu_current",
     "clean_units_prior", "weighted_cpu_prior",
     "materials_cost_current", "materials_cost_prior",
-    "delta_cpu", "delta_pct"
+    "delta_cpu", "delta_pct", "cost_flag_anomaly"
 ]].copy()
 
 mom_display = mom_display.sort_values(by="delta_pct", ascending=False)
@@ -277,7 +296,7 @@ mom_display.columns = [
     "Units (Current)", "CPU (Current)",
     "Units (Prior)", "CPU (Prior)",
     "Cost (Current)", "Cost (Prior)",
-    "Δ CPU ($)", "Δ %"
+    "Δ CPU ($)", "Δ %", "Flag"
 ]
 
 mom_display["Units (Current)"] = mom_display["Units (Current)"].map("{:,.0f}".format)
@@ -311,6 +330,38 @@ top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".fo
 top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
 top_decreases["Δ %"] = top_decreases["Δ %"].map("{:+.2f}%".format)
 st.dataframe(top_decreases, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# ── Cost Anomaly Detection ────────────────────────────────────────────────────
+st.subheader("🚨 Cost Anomalies — Statistical Detection")
+st.caption("SKUs where current cost is statistically abnormal vs their own history. Z-score > 2 = spike. Z-score < -2 = drop.")
+
+anomalies = merged[merged["cost_flag_anomaly"] != "Normal"].copy()
+anomalies = anomalies.sort_values(by="z_score", ascending=False)
+
+if not anomalies.empty:
+    anomalies_display = anomalies[[
+        "sku", "brand",
+        "weighted_cpu_current",
+        "cpu_mean",
+        "z_score",
+        "cost_flag_anomaly"
+    ]].copy()
+
+    anomalies_display.columns = [
+        "SKU", "Brand",
+        "CPU (Current)", "CPU (Historical Avg)",
+        "Z-Score", "Flag"
+    ]
+
+    anomalies_display["CPU (Current)"] = anomalies_display["CPU (Current)"].map("${:.4f}".format)
+    anomalies_display["CPU (Historical Avg)"] = anomalies_display["CPU (Historical Avg)"].map("${:.4f}".format)
+    anomalies_display["Z-Score"] = anomalies_display["Z-Score"].map("{:.2f}".format)
+
+    st.dataframe(anomalies_display, use_container_width=True, hide_index=True)
+else:
+    st.success("No cost anomalies detected for the selected period and filters.")
 
 st.divider()
 
