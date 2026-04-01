@@ -221,8 +221,8 @@ if selected_brand != "All Brands":
 if selected_line != "All Product Lines":
     silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
 if selected_year != "All Years":
-    silver_filtered = silver_filtered[
-        silver_filtered["completed_date"].astype(str).str[:4] == str(selected_year)
+ silver_filtered = silver_filtered[
+        silver_filtered["year"] == int(selected_year)
     ]
 
 # Format for display
