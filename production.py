@@ -119,3 +119,64 @@ else:
     st.info("No data for selected filters.")
 
 st.divider()
+# ── Cost Trend ────────────────────────────────────────────────────────────────
+st.subheader("Avg Production Cost / Unit by Month")
+
+cost_trend = (
+    filtered[filtered["avg_cost_per_unit"] > 0]
+    .groupby(["production_month_key", "brand"])["avg_cost_per_unit"]
+    .mean()
+    .reset_index()
+    .sort_values("production_month_key")
+)
+
+if not cost_trend.empty:
+    fig2 = px.line(
+        cost_trend,
+        x="production_month_key",
+        y="avg_cost_per_unit",
+        color="brand",
+        labels={
+            "production_month_key": "Month",
+            "avg_cost_per_unit": "Avg Cost / Unit ($)",
+            "brand": "Brand"
+        },
+        color_discrete_map={
+            "St. Ides": "#C8102E",
+            "Pabst": "#003087",
+            "NYF": "#F5A800"
+        }
+    )
+    fig2.update_layout(
+        xaxis_tickangle=-45,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend_title="Brand"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+else:
+    st.info("No cost data for selected filters.")
+
+st.divider()
+
+# ── Brand Breakdown ───────────────────────────────────────────────────────────
+st.subheader("Production by Brand & Product Line")
+
+brand_summary = (
+    filtered.groupby(["brand", "product_line"])
+    .agg(
+        batches=("batch_count", "sum"),
+        units=("total_units", "sum"),
+        cost=("total_materials_cost", "sum")
+    )
+    .reset_index()
+    .sort_values("units", ascending=False)
+)
+
+brand_summary["cost"] = brand_summary["cost"].map("${:,.0f}".format)
+brand_summary["units"] = brand_summary["units"].map("{:,.0f}".format)
+brand_summary.columns = ["Brand", "Product Line", "Batches", "Units Produced", "Materials Cost"]
+
+st.dataframe(brand_summary, use_container_width=True, hide_index=True)
+
+st.divider()
