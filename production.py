@@ -245,7 +245,10 @@ merged = current.merge(
     how="left"
 )
 
-merged = merged[merged["clean_units_current"] > 100]
+merged = merged[
+    (merged["clean_units_current"] > 100) |
+    (merged["clean_units_prior"] > 100)
+]
 
 merged["delta_cpu"] = merged["weighted_cpu_current"] - merged["weighted_cpu_prior"]
 merged["delta_pct"] = np.where(
