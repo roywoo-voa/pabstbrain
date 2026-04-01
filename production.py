@@ -232,7 +232,8 @@ col_m1, col_m2 = st.columns(2)
 with col_m1:
     current_month = st.selectbox("Current Month", available_months, index=0)
 with col_m2:
-    prior_month = st.selectbox("Prior Month", available_months, index=1)
+prior_index = 1 if len(available_months) > 1 else 0
+prior_month = st.selectbox("Prior Month", available_months, index=prior_index)
 
 # Filter to selected months
 current = sku_df[sku_df["month"] == current_month].copy()
