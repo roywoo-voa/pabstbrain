@@ -269,8 +269,7 @@ mom_display = merged[[
     "delta_cpu", "delta_pct"
 ]].copy()
 
-mom_display.columns = [
-    "SKU", "Brand", "Product Line",
+mom_display = mom_display.sort_values(by="delta_pct", ascending=False)
     "Units (Current)", "CPU (Current)",
     "Units (Prior)", "CPU (Prior)",
     "Cost (Current)", "Cost (Prior)",
