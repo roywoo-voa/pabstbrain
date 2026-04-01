@@ -245,6 +245,8 @@ merged = current.merge(
     how="left"
 )
 
+merged = merged[merged["clean_units_current"] > 100]
+
 merged["delta_cpu"] = merged["weighted_cpu_current"] - merged["weighted_cpu_prior"]
 merged["delta_pct"] = np.where(
     merged["weighted_cpu_prior"] > 0,
@@ -286,7 +288,10 @@ mom_display["Δ %"] = mom_display["Δ %"].map("{:+.2f}%".format)
 
 st.dataframe(mom_display, use_container_width=True, hide_index=True)
 
-valid_prior = merged[merged["weighted_cpu_prior"].notna() & (merged["weighted_cpu_prior"] > 0)]
+valid_prior = merged[
+    merged["weighted_cpu_prior"].notna() &
+    (merged["weighted_cpu_prior"] > 0)
+].copy()
 
 st.markdown("**Top 5 Cost Increases**")
 top_increases = valid_prior.nlargest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
