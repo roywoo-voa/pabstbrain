@@ -298,7 +298,7 @@ top_increases["Δ %"] = top_increases["Δ %"].map("{:+.2f}%".format)
 st.dataframe(top_increases, use_container_width=True, hide_index=True)
 
 st.markdown("**Top 5 Cost Decreases**")
-top_decreases = merged.nsmallest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
+top_decreases = merged[merged["weighted_cpu_prior"].notna() & (merged["weighted_cpu_prior"] > 0)].nsmallest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
 top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %"]
 top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".format)
 top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
