@@ -70,7 +70,10 @@ total_batches = int(filtered["batch_count"].sum())
 total_units = int(filtered["total_units"].sum())
 costed_units = int(filtered["clean_units"].sum())
 total_cost = filtered["total_materials_cost"].sum()
-avg_cpu = filtered["avg_cost_per_unit"].mean()
+avg_cpu = (
+    filtered["total_materials_cost"].sum() / filtered["clean_units"].sum()
+    if filtered["clean_units"].sum() > 0 else 0
+)
 
 k1, k2, k3, k4, k5 = st.columns(5)
 
