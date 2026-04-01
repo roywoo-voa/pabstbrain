@@ -209,3 +209,101 @@ with st.expander("📊 Data Quality & Audit Trail"):
     flag_summary.columns = ["Cost Flag", "Batches", "Units"]
     flag_summary["Units"] = flag_summary["Units"].map("{:,.0f}".format)
     st.dataframe(flag_summary, use_container_width=True, hide_index=True)
+st.divider()
+
+# ── SKU Month-over-Month Cost Comparison ─────────────────────────────────────
+st.subheader("SKU Cost — Month over Month")
+
+@st.cache_data(ttl=3600)
+def load_sku_cost():
+    query = """
+        SELECT *
+        FROM `pabst_mis.gold_sku_cost_monthly`
+        ORDER BY month_date DESC, materials_cost DESC
+    """
+    return client.query(query).to_dataframe()
+
+sku_df = load_sku_cost()
+
+# Month selector
+available_months = sorted(sku_df["month"].unique().tolist(), reverse=True)
+col_m1, col_m2 = st.columns(2)
+with col_m1:
+    current_month = st.selectbox("Current Month", available_months, index=0)
+with col_m2:
+    prior_month = st.selectbox("Prior Month", available_months, index=1)
+
+# Filter to selected months
+current = sku_df[sku_df["month"] == current_month].copy()
+prior = sku_df[sku_df["month"] == prior_month].copy()
+
+# Merge on SKU + brand
+merged = current.merge(
+    prior[["sku", "brand", "clean_units", "materials_cost", "weighted_cpu"]],
+    on=["sku", "brand"],
+    suffixes=("_current", "_prior"),
+    how="left"
+)
+
+# Calculate changes
+merged["delta_cpu"] = merged["weighted_cpu_current"] - merged["weighted_cpu_prior"]
+merged["delta_pct"] = (
+    merged["delta_cpu"] / merged["weighted_cpu_prior"] * 100
+).round(2)
+
+# Apply brand filter from global filters
+if selected_brand != "All Brands":
+    merged = merged[merged["brand"] == selected_brand]
+if selected_line != "All Product Lines":
+    merged = merged[merged["product_line"] == selected_line]
+
+# Build display table
+mom_display = merged[[
+    "sku", "brand", "product_line",
+    "clean_units_current", "weighted_cpu_current",
+    "clean_units_prior", "weighted_cpu_prior",
+    "materials_cost_current", "materials_cost_prior",
+    "delta_cpu", "delta_pct"
+]].copy()
+
+mom_display.columns = [
+    "SKU", "Brand", "Product Line",
+    "Units (Current)", "CPU (Current)",
+    "Units (Prior)", "CPU (Prior)",
+    "Cost (Current)", "Cost (Prior)",
+    "Δ CPU ($)", "Δ %"
+]
+
+mom_display["Units (Current)"] = mom_display["Units (Current)"].map("{:,.0f}".format)
+mom_display["Units (Prior)"] = mom_display["Units (Prior)"].map("{:,.0f}".format)
+mom_display["CPU (Current)"] = mom_display["CPU (Current)"].map("${:.4f}".format)
+mom_display["CPU (Prior)"] = mom_display["CPU (Prior)"].map("${:.4f}".format)
+mom_display["Cost (Current)"] = mom_display["Cost (Current)"].map("${:,.0f}".format)
+mom_display["Cost (Prior)"] = mom_display["Cost (Prior)"].map("${:,.0f}".format)
+mom_display["Δ CPU ($)"] = mom_display["Δ CPU ($)"].map("${:+.4f}".format)
+mom_display["Δ %"] = mom_display["Δ %"].map("{:+.2f}%".format)
+
+st.dataframe(mom_display, use_container_width=True, hide_index=True)
+
+# Top movers
+st.markdown("**Top 5 Cost Increases**")
+top_increases = merged.nlargest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
+top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %"]
+top_increases["CPU (Current)"] = top_increases["CPU (Current)"].map("${:.4f}".format)
+top_increases["CPU (Prior)"] = top_increases["CPU (Prior)"].map("${:.4f}".format)
+top_increases["Δ %"] = top_increases["Δ %"].map("{:+.2f}%".format)
+st.dataframe(top_increases, use_container_width=True, hide_index=True)
+
+st.markdown("**Top 5 Cost Decreases**")
+top_decreases = merged.nsmallest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
+top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %"]
+top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".format)
+top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
+top_decreases["Δ %"] = top_decreases["Δ %"].map("{:+.2f}%".format)
+st.dataframe(top_decreases, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# ── FIFO / Transfer Readiness (Placeholder) ───────────────────────────────────
+with st.expander("📦 FG Transfer Readiness — Coming Soon"):
+    st.info("FIFO inventory layer and finished goods transfer readiness are pending inventory system integration. This section will show units available by SKU, oldest batch first, and estimated transfer value once the inventory layer is complete.")
