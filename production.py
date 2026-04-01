@@ -234,6 +234,8 @@ with col_m2:
 
 if current_month == prior_month:
     st.warning("Current Month and Prior Month are the same. Select different months for a meaningful comparison.")
+
+current = sku_df[sku_df["month"] == current_month].copy()
 prior = sku_df[sku_df["month"] == prior_month].copy()
 
 merged = current.merge(
