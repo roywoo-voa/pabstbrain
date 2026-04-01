@@ -80,3 +80,42 @@ k4.metric("Materials Cost Incurred", f"${total_cost:,.0f}")
 k5.metric("Avg Production Cost / Unit", f"${avg_cpu:.4f}")
 
 st.divider()
+# ── Production Trend ──────────────────────────────────────────────────────────
+st.subheader("Units Produced by Month")
+
+trend = (
+    filtered.groupby(["production_month_key", "brand"])["total_units"]
+    .sum()
+    .reset_index()
+    .sort_values("production_month_key")
+)
+
+if not trend.empty:
+    import plotly.express as px
+    fig = px.bar(
+        trend,
+        x="production_month_key",
+        y="total_units",
+        color="brand",
+        labels={
+            "production_month_key": "Month",
+            "total_units": "Units Produced",
+            "brand": "Brand"
+        },
+        color_discrete_map={
+            "St. Ides": "#C8102E",
+            "Pabst": "#003087",
+            "NYF": "#F5A800"
+        }
+    )
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend_title="Brand"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No data for selected filters.")
+
+st.divider()
