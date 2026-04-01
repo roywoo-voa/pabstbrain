@@ -92,7 +92,7 @@ trend = (
 )
 
 if not trend.empty:
-    import plotly.express as px
+    
     fig = px.bar(
         trend,
         x="production_month_key",
