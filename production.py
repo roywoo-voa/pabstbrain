@@ -248,8 +248,10 @@ merged = current.merge(
 
 # Calculate changes
 merged["delta_cpu"] = merged["weighted_cpu_current"] - merged["weighted_cpu_prior"]
-merged["delta_pct"] = (
-    merged["delta_cpu"] / merged["weighted_cpu_prior"] * 100
+merged["delta_pct"] = np.where(
+    merged["weighted_cpu_prior"] > 0,
+    (merged["delta_cpu"] / merged["weighted_cpu_prior"] * 100),
+    0
 ).round(2)
 
 # Apply brand filter from global filters
