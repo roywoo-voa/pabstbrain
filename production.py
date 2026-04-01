@@ -62,3 +62,21 @@ if selected_line != "All Product Lines":
     filtered = filtered[filtered["product_line"] == selected_line]
 
 st.divider()
+# ── KPI Cards ─────────────────────────────────────────────────────────────────
+st.subheader("Production Overview")
+
+total_batches = int(filtered["batch_count"].sum())
+total_units = int(filtered["total_units"].sum())
+costed_units = int(filtered["clean_units"].sum())
+total_cost = filtered["total_materials_cost"].sum()
+avg_cpu = filtered["avg_cost_per_unit"].mean()
+
+k1, k2, k3, k4, k5 = st.columns(5)
+
+k1.metric("Batches", f"{total_batches:,}")
+k2.metric("Units Produced", f"{total_units:,.0f}")
+k3.metric("Costed Units", f"{costed_units:,.0f}")
+k4.metric("Materials Cost Incurred", f"${total_cost:,.0f}")
+k5.metric("Avg Production Cost / Unit", f"${avg_cpu:.4f}")
+
+st.divider()
