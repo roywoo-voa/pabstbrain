@@ -31,3 +31,34 @@ def load_gold():
     return client.query(query).to_dataframe()
 
 df = load_gold()
+# ── Header ───────────────────────────────────────────────────────────────────
+st.title("🏭 Production Intelligence")
+st.caption("Pabst Labs · Materials cost incurred · Data current Jan 2024 – Sep 2025 (Oct 2025–present pending Roshi correction)")
+
+st.divider()
+
+# ── Global filters ────────────────────────────────────────────────────────────
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    brands = ["All Brands"] + sorted(df["brand"].dropna().unique().tolist())
+    selected_brand = st.selectbox("Brand", brands)
+
+with col2:
+    years = ["All Years"] + sorted(df["production_year"].dropna().unique().tolist(), reverse=True)
+    selected_year = st.selectbox("Year", years)
+
+with col3:
+    product_lines = ["All Product Lines"] + sorted(df["product_line"].dropna().unique().tolist())
+    selected_line = st.selectbox("Product Line", product_lines)
+
+# ── Apply filters ─────────────────────────────────────────────────────────────
+filtered = df.copy()
+if selected_brand != "All Brands":
+    filtered = filtered[filtered["brand"] == selected_brand]
+if selected_year != "All Years":
+    filtered = filtered[filtered["production_year"] == selected_year]
+if selected_line != "All Product Lines":
+    filtered = filtered[filtered["product_line"] == selected_line]
+
+st.divider()
