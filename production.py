@@ -4,7 +4,7 @@ import plotly.express as px
 from google.oauth2 import service_account
 from google.cloud import bigquery
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="PabstBrain — Production",
     page_icon="🏭",
@@ -21,7 +21,7 @@ def get_client():
 
 client = get_client()
 
-# ── Data loader ───────────────────────────────────────────────────────────────
+# ── Data loaders ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def load_gold():
     query = """
@@ -31,8 +31,23 @@ def load_gold():
     """
     return client.query(query).to_dataframe()
 
+@st.cache_data(ttl=3600)
+def load_silver():
+    query = """
+        SELECT
+            Batch_Number, Item_Name, brand, product_line,
+            completed_date, units_produced, cost_per_unit,
+            materials_cost, cost_flag, Location
+        FROM `pabst_mis.silver_production`
+        ORDER BY completed_date DESC
+    """
+    return client.query(query).to_dataframe()
+
 df = load_gold()
-# ── Header ───────────────────────────────────────────────────────────────────
+silver = load_silver()
+silver["year"] = pd.to_datetime(silver["completed_date"]).dt.year
+
+# ── Header ────────────────────────────────────────────────────────────────────
 st.title("🏭 Production Intelligence")
 st.caption("Pabst Labs · Materials cost incurred · Data current Jan 2024 – Sep 2025 (Oct 2025–present pending Roshi correction)")
 
@@ -62,7 +77,16 @@ if selected_year != "All Years":
 if selected_line != "All Product Lines":
     filtered = filtered[filtered["product_line"] == selected_line]
 
+silver_filtered = silver.copy()
+if selected_brand != "All Brands":
+    silver_filtered = silver_filtered[silver_filtered["brand"] == selected_brand]
+if selected_line != "All Product Lines":
+    silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
+if selected_year != "All Years":
+    silver_filtered = silver_filtered[silver_filtered["year"] == int(selected_year)]
+
 st.divider()
+
 # ── KPI Cards ─────────────────────────────────────────────────────────────────
 st.subheader("Production Overview")
 
@@ -71,12 +95,10 @@ total_units = int(filtered["total_units"].sum())
 costed_units = int(filtered["clean_units"].sum())
 total_cost = filtered["total_materials_cost"].sum()
 avg_cpu = (
-    filtered["total_materials_cost"].sum() / filtered["clean_units"].sum()
-    if filtered["clean_units"].sum() > 0 else 0
+    total_cost / costed_units if costed_units > 0 else 0
 )
 
 k1, k2, k3, k4, k5 = st.columns(5)
-
 k1.metric("Batches", f"{total_batches:,}")
 k2.metric("Units Produced", f"{total_units:,.0f}")
 k3.metric("Costed Units", f"{costed_units:,.0f}")
@@ -84,6 +106,7 @@ k4.metric("Materials Cost Incurred", f"${total_cost:,.0f}")
 k5.metric("Avg Production Cost / Unit", f"${avg_cpu:.4f}")
 
 st.divider()
+
 # ── Production Trend ──────────────────────────────────────────────────────────
 st.subheader("Units Produced by Month")
 
@@ -95,50 +118,32 @@ trend = (
 )
 
 if not trend.empty:
-    
     fig = px.bar(
         trend,
         x="production_month_key",
         y="total_units",
         color="brand",
-        labels={
-            "production_month_key": "Month",
-            "total_units": "Units Produced",
-            "brand": "Brand"
-        },
-        color_discrete_map={
-            "St. Ides": "#C8102E",
-            "Pabst": "#003087",
-            "NYF": "#F5A800"
-        }
+        labels={"production_month_key": "Month", "total_units": "Units Produced", "brand": "Brand"},
+        color_discrete_map={"St. Ides": "#C8102E", "Pabst": "#003087", "NYF": "#F5A800"}
     )
-    fig.update_layout(
-        xaxis_tickangle=-45,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        legend_title="Brand"
-    )
+    fig.update_layout(xaxis_tickangle=-45, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No data for selected filters.")
 
 st.divider()
+
 # ── Cost Trend ────────────────────────────────────────────────────────────────
-st.subheader("Avg Production Cost / Unit by Month")
+st.subheader("Avg Production Cost / Unit by Month (Weighted)")
 
 cost_trend = (
     filtered[filtered["clean_units"] > 0]
     .groupby(["production_month_key", "brand"])
-    .agg(
-        total_cost=("total_materials_cost", "sum"),
-        total_units=("clean_units", "sum")
-    )
+    .agg(total_cost=("total_materials_cost", "sum"), total_units=("clean_units", "sum"))
     .reset_index()
     .sort_values("production_month_key")
 )
-cost_trend["avg_cost_per_unit"] = (
-    cost_trend["total_cost"] / cost_trend["total_units"]
-)
+cost_trend["avg_cost_per_unit"] = cost_trend["total_cost"] / cost_trend["total_units"]
 
 if not cost_trend.empty:
     fig2 = px.line(
@@ -146,23 +151,10 @@ if not cost_trend.empty:
         x="production_month_key",
         y="avg_cost_per_unit",
         color="brand",
-        labels={
-            "production_month_key": "Month",
-            "avg_cost_per_unit": "Avg Cost / Unit ($)",
-            "brand": "Brand"
-        },
-        color_discrete_map={
-            "St. Ides": "#C8102E",
-            "Pabst": "#003087",
-            "NYF": "#F5A800"
-        }
+        labels={"production_month_key": "Month", "avg_cost_per_unit": "Avg Cost / Unit ($)", "brand": "Brand"},
+        color_discrete_map={"St. Ides": "#C8102E", "Pabst": "#003087", "NYF": "#F5A800"}
     )
-    fig2.update_layout(
-        xaxis_tickangle=-45,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        legend_title="Brand"
-    )
+    fig2.update_layout(xaxis_tickangle=-45, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig2, use_container_width=True)
 else:
     st.info("No cost data for selected filters.")
@@ -174,83 +166,28 @@ st.subheader("Production by Brand & Product Line")
 
 brand_summary = (
     filtered.groupby(["brand", "product_line"])
-    .agg(
-        batches=("batch_count", "sum"),
-        units=("total_units", "sum"),
-        cost=("total_materials_cost", "sum")
-    )
+    .agg(batches=("batch_count", "sum"), units=("total_units", "sum"), cost=("total_materials_cost", "sum"))
     .reset_index()
     .sort_values("units", ascending=False)
 )
-
 brand_summary["cost"] = brand_summary["cost"].map("${:,.0f}".format)
 brand_summary["units"] = brand_summary["units"].map("{:,.0f}".format)
 brand_summary.columns = ["Brand", "Product Line", "Batches", "Units Produced", "Materials Cost"]
-
 st.dataframe(brand_summary, use_container_width=True, hide_index=True)
 
 st.divider()
+
 # ── Batch Detail ──────────────────────────────────────────────────────────────
 st.subheader("Batch Detail")
 
-@st.cache_data(ttl=3600)
-def load_silver():
-    query = """
-        SELECT
-            Batch_Number,
-            Item_Name,
-            brand,
-            product_line,
-            completed_date,
-            units_produced,
-            cost_per_unit,
-            materials_cost,
-            cost_flag,
-            Location
-        FROM `pabst_mis.silver_production`
-        ORDER BY completed_date DESC
-    """
-    return client.query(query).to_dataframe()
-
-silver = load_silver()
-
-# Apply same filters to silver
-silver["year"] = pd.to_datetime(silver["completed_date"]).dt.year
-silver_filtered = silver.copy()
-if selected_brand != "All Brands":
-    silver_filtered = silver_filtered[silver_filtered["brand"] == selected_brand]
-if selected_line != "All Product Lines":
-    silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
-if selected_year != "All Years":
-    silver_filtered = silver_filtered[
-        silver_filtered["year"] == int(selected_year)
-    ]
-silver["year"] = pd.to_datetime(silver["completed_date"]).dt.year
-silver_filtered = silver.copy()
-if selected_brand != "All Brands":
-    silver_filtered = silver_filtered[silver_filtered["brand"] == selected_brand]
-if selected_line != "All Product Lines":
-    silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
-if selected_year != "All Years":
-    silver_filtered = silver_filtered[
-        silver_filtered["year"] == int(selected_year)
-    ]
-
-# Format for display
 display = silver_filtered[[
     "Batch_Number", "Item_Name", "brand", "product_line",
     "completed_date", "units_produced", "cost_per_unit", "materials_cost", "cost_flag"
 ]].copy()
-
-display.columns = [
-    "Batch", "Product", "Brand", "Product Line",
-    "Completed", "Units", "Cost/Unit", "Materials Cost", "Flag"
-]
-
+display.columns = ["Batch", "Product", "Brand", "Product Line", "Completed", "Units", "Cost/Unit", "Materials Cost", "Flag"]
 display["Units"] = display["Units"].map("{:,.0f}".format)
 display["Cost/Unit"] = display["Cost/Unit"].map("${:.4f}".format)
 display["Materials Cost"] = display["Materials Cost"].map("${:,.0f}".format)
-
 st.dataframe(display, use_container_width=True, hide_index=True)
 
 st.divider()
