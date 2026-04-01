@@ -35,14 +35,19 @@ def fmt_num(x):
     return f"{x:,.0f}" if pd.notnull(x) else "-"
 
 def highlight_variance_flag(row):
-    flag = row.get("Variance Flag", row.get("variance_flag", ""))
-    if flag == "Outlier":
-        return ["background-color: #ffcccc"] * len(row)
-    if flag == "Increase vs Prior":
-        return ["background-color: #ffe6cc"] * len(row)
-    if flag == "Decrease vs Prior":
-        return ["background-color: #e6ffe6"] * len(row)
-    return [""] * len(row)
+    styles = [""] * len(row)
+    try:
+        flag_idx = row.index.get_loc("Variance Flag")
+        flag = row.iloc[flag_idx]
+        if flag == "Outlier":
+            styles[flag_idx] = "background-color: #ff4444; color: white; font-weight: bold"
+        elif flag == "Increase vs Prior":
+            styles[flag_idx] = "background-color: #ff9900; color: white; font-weight: bold"
+        elif flag == "Decrease vs Prior":
+            styles[flag_idx] = "background-color: #00aa44; color: white; font-weight: bold"
+    except (KeyError, TypeError):
+        pass
+    return styles
 
 # ── Data loaders ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=3600)
