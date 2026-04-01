@@ -225,12 +225,14 @@ st.divider()
 st.subheader("SKU Cost — Month over Month")
 
 available_months = sorted(sku_df["month"].unique().tolist(), reverse=True)
-col_m1, col_m2 = st.columns(2)
+col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
     current_month = st.selectbox("Current Month", available_months, index=0)
 with col_m2:
     prior_index = 1 if len(available_months) > 1 else 0
     prior_month = st.selectbox("Prior Month", available_months, index=prior_index)
+with col_m3:
+    min_units = st.slider("Min Units Filter", 0, 500, 100)
 
 if current_month == prior_month:
     st.warning("Current Month and Prior Month are the same. Select different months for a meaningful comparison.")
@@ -245,8 +247,8 @@ history = sku_df.groupby("sku").agg(
 ).reset_index()
 
 merged = current.merge(
-    prior[["sku", "brand", "clean_units", "materials_cost", "weighted_cpu"]],
-    on=["sku", "brand"],
+    prior[["sku", "brand", "product_line", "clean_units", "materials_cost", "weighted_cpu"]],
+    on=["sku", "brand", "product_line"],
     suffixes=("_current", "_prior"),
     how="left"
 )
@@ -254,16 +256,16 @@ merged = current.merge(
 merged = merged.merge(history, on="sku", how="left")
 
 merged = merged[
-    (merged["clean_units_current"] > 100) |
-    (merged["clean_units_prior"] > 100)
+    (merged["clean_units_current"] >= min_units) |
+    (merged["clean_units_prior"] >= min_units)
 ]
 
 merged["delta_cpu"] = merged["weighted_cpu_current"] - merged["weighted_cpu_prior"]
 merged["delta_pct"] = np.where(
     merged["weighted_cpu_prior"] > 0,
     (merged["delta_cpu"] / merged["weighted_cpu_prior"] * 100),
-    0
-).round(2)
+    np.nan
+)
 
 merged["z_score"] = np.where(
     merged["cpu_std"] > 0,
@@ -276,6 +278,8 @@ merged["cost_flag_anomaly"] = np.where(
     np.where(merged["z_score"] < -2, "✅ Drop", "Normal")
 )
 
+merged["impact"] = merged["delta_cpu"] * merged["clean_units_current"]
+
 if selected_brand != "All Brands":
     merged = merged[merged["brand"] == selected_brand]
 if selected_line != "All Product Lines":
@@ -286,17 +290,17 @@ mom_display = merged[[
     "clean_units_current", "weighted_cpu_current",
     "clean_units_prior", "weighted_cpu_prior",
     "materials_cost_current", "materials_cost_prior",
-    "delta_cpu", "delta_pct", "cost_flag_anomaly"
+    "delta_cpu", "delta_pct", "impact", "cost_flag_anomaly"
 ]].copy()
 
-mom_display = mom_display.sort_values(by="delta_pct", ascending=False)
+mom_display = mom_display.sort_values(by="impact", ascending=False)
 
 mom_display.columns = [
     "SKU", "Brand", "Product Line",
     "Units (Current)", "CPU (Current)",
     "Units (Prior)", "CPU (Prior)",
     "Cost (Current)", "Cost (Prior)",
-    "Δ CPU ($)", "Δ %", "Flag"
+    "Δ CPU ($)", "Δ %", "$ Impact", "Flag"
 ]
 
 mom_display["Units (Current)"] = mom_display["Units (Current)"].map("{:,.0f}".format)
@@ -306,7 +310,8 @@ mom_display["CPU (Prior)"] = mom_display["CPU (Prior)"].map("${:.4f}".format)
 mom_display["Cost (Current)"] = mom_display["Cost (Current)"].map("${:,.0f}".format)
 mom_display["Cost (Prior)"] = mom_display["Cost (Prior)"].map("${:,.0f}".format)
 mom_display["Δ CPU ($)"] = mom_display["Δ CPU ($)"].map("${:+.4f}".format)
-mom_display["Δ %"] = mom_display["Δ %"].map("{:+.2f}%".format)
+mom_display["Δ %"] = mom_display["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
+mom_display["$ Impact"] = mom_display["$ Impact"].map("${:+,.0f}".format)
 
 st.dataframe(mom_display, use_container_width=True, hide_index=True)
 
@@ -315,20 +320,22 @@ valid_prior = merged[
     (merged["weighted_cpu_prior"] > 0)
 ].copy()
 
-st.markdown("**Top 5 Cost Increases**")
-top_increases = valid_prior.nlargest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
-top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %"]
+st.markdown("**Top 5 Cost Increases (by $ Impact)**")
+top_increases = valid_prior.nlargest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
+top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
 top_increases["CPU (Current)"] = top_increases["CPU (Current)"].map("${:.4f}".format)
 top_increases["CPU (Prior)"] = top_increases["CPU (Prior)"].map("${:.4f}".format)
-top_increases["Δ %"] = top_increases["Δ %"].map("{:+.2f}%".format)
+top_increases["Δ %"] = top_increases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
+top_increases["$ Impact"] = top_increases["$ Impact"].map("${:+,.0f}".format)
 st.dataframe(top_increases, use_container_width=True, hide_index=True)
 
-st.markdown("**Top 5 Cost Decreases**")
-top_decreases = valid_prior.nsmallest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
-top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %"]
+st.markdown("**Top 5 Cost Decreases (by $ Impact)**")
+top_decreases = valid_prior.nsmallest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
+top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
 top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".format)
 top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
-top_decreases["Δ %"] = top_decreases["Δ %"].map("{:+.2f}%".format)
+top_decreases["Δ %"] = top_decreases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
+top_decreases["$ Impact"] = top_decreases["$ Impact"].map("${:+,.0f}".format)
 st.dataframe(top_decreases, use_container_width=True, hide_index=True)
 
 st.divider()
