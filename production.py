@@ -290,7 +290,7 @@ st.dataframe(mom_display, use_container_width=True, hide_index=True)
 
 # Top movers
 st.markdown("**Top 5 Cost Increases**")
-top_increases = merged.nlargest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
+top_increases = merged[merged["weighted_cpu_prior"].notna() & (merged["weighted_cpu_prior"] > 0)].nlargest(5, "delta_pct")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct"]].copy()
 top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %"]
 top_increases["CPU (Current)"] = top_increases["CPU (Current)"].map("${:.4f}".format)
 top_increases["CPU (Prior)"] = top_increases["CPU (Prior)"].map("${:.4f}".format)
