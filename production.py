@@ -1,693 +1,693 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import numpy as np
-from google.oauth2 import service_account
 from google.cloud import bigquery
+from google.oauth2 import service_account
+import json
+import os
 
-# ── Page config ───────────────────────────────────────────────────────────────
+# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="PabstBrain — Production",
     page_icon="🏭",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# ── BigQuery connection ───────────────────────────────────────────────────────
+# ── STYLES ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+    background-color: #0f1117;
+    color: #e8e8e8;
+}
+
+.stApp { background-color: #0f1117; }
+
+/* Header */
+.pb-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 24px 0 8px 0;
+    border-bottom: 1px solid #2a2a2a;
+    margin-bottom: 24px;
+}
+.pb-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 22px;
+    font-weight: 500;
+    color: #ffffff;
+    letter-spacing: -0.5px;
+}
+.pb-subtitle {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: #666;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* KPI cards */
+.kpi-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+}
+.kpi-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 16px 20px;
+}
+.kpi-label {
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 6px;
+    font-family: 'DM Mono', monospace;
+}
+.kpi-value {
+    font-size: 24px;
+    font-weight: 600;
+    color: #ffffff;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: -1px;
+}
+.kpi-sub {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 4px;
+}
+
+/* Coverage badges */
+.badge-good     { background:#0d3a1e; color:#3fb950; border:1px solid #238636; border-radius:4px; padding:2px 8px; font-size:11px; font-family:'DM Mono',monospace; }
+.badge-moderate { background:#2d2006; color:#d29922; border:1px solid #9e6a03; border-radius:4px; padding:2px 8px; font-size:11px; font-family:'DM Mono',monospace; }
+.badge-low      { background:#2d1b00; color:#f0883e; border:1px solid #bd561d; border-radius:4px; padding:2px 8px; font-size:11px; font-family:'DM Mono',monospace; }
+.badge-critical { background:#3d0c0c; color:#f85149; border:1px solid #da3633; border-radius:4px; padding:2px 8px; font-size:11px; font-family:'DM Mono',monospace; }
+
+/* Exception badges */
+.exc-corrupted  { background:#3d1a6e; color:#d2a8ff; border:1px solid #8b5cf6; border-radius:4px; padding:1px 6px; font-size:10px; font-family:'DM Mono',monospace; }
+.exc-missing    { background:#1a2332; color:#79c0ff; border:1px solid #388bfd; border-radius:4px; padding:1px 6px; font-size:10px; font-family:'DM Mono',monospace; }
+.exc-zero       { background:#2d1b00; color:#f0883e; border:1px solid #bd561d; border-radius:4px; padding:1px 6px; font-size:10px; font-family:'DM Mono',monospace; }
+.exc-variance   { background:#3d0c0c; color:#f85149; border:1px solid #da3633; border-radius:4px; padding:1px 6px; font-size:10px; font-family:'DM Mono',monospace; }
+.exc-nopo       { background:#2d2006; color:#d29922; border:1px solid #9e6a03; border-radius:4px; padding:1px 6px; font-size:10px; font-family:'DM Mono',monospace; }
+.exc-ok         { color:#3fb950; font-size:10px; font-family:'DM Mono',monospace; }
+
+/* Section headers */
+.section-header {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin: 20px 0 12px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #21262d;
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent;
+    border-bottom: 1px solid #21262d;
+    gap: 0;
+}
+.stTabs [data-baseweb="tab"] {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: #8b949e;
+    padding: 10px 20px;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+}
+.stTabs [aria-selected="true"] {
+    color: #ffffff;
+    border-bottom: 2px solid #f78166;
+    background: transparent;
+}
+
+/* Dataframe */
+.stDataFrame { border: 1px solid #21262d; border-radius: 8px; }
+
+/* Selectbox / filters */
+.stSelectbox > div > div,
+.stMultiSelect > div > div {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    color: #e8e8e8;
+}
+
+/* Metric delta */
+.stMetric { background: #161b22; border-radius: 8px; padding: 12px; border: 1px solid #21262d; }
+
+/* Drilldown ingredient table */
+.ingredient-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr;
+    gap: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid #21262d;
+    align-items: center;
+    font-size: 13px;
+}
+.ingredient-row:hover { background: #161b22; }
+.ingredient-header {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    background: #0d1117;
+    border-bottom: 2px solid #21262d;
+    border-radius: 6px 6px 0 0;
+}
+.pos-var { color: #f85149; }
+.neg-var { color: #3fb950; }
+.neu-var { color: #8b949e; }
+
+/* Divider */
+hr { border-color: #21262d; }
+
+button[kind="primary"] {
+    background: #238636;
+    border: 1px solid #2ea043;
+    color: white;
+    border-radius: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── BIGQUERY CONNECTION ───────────────────────────────────────────────────────
+PROJECT = "amplified-name-490015-e0"
+DATASET = "pabst_mis"
+
 @st.cache_resource
-def get_client():
-    credentials = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"]
-    )
-    return bigquery.Client(credentials=credentials)
+def get_bq_client():
+    if "gcp_service_account" in st.secrets:
+        creds = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/bigquery"]
+        )
+        return bigquery.Client(credentials=creds, project=PROJECT)
+    return bigquery.Client(project=PROJECT)
 
-client = get_client()
-
-# ── Helper functions ──────────────────────────────────────────────────────────
-def fmt_pct(x):
-    return f"{x*100:.1f}%" if pd.notnull(x) else "-"
-
-def fmt_usd(x, decimals=0):
-    if pd.isnull(x):
-        return "-"
-    return f"${x:,.{decimals}f}"
-
-def fmt_num(x):
-    return f"{x:,.0f}" if pd.notnull(x) else "-"
-
-def highlight_variance_flag(row):
-    styles = [""] * len(row)
-    try:
-        flag_idx = row.index.get_loc("Variance Flag")
-        flag = row.iloc[flag_idx]
-        if flag == "Outlier":
-            styles[flag_idx] = "background-color: #ff4444; color: white; font-weight: bold"
-        elif flag == "Increase vs Prior":
-            styles[flag_idx] = "background-color: #ff9900; color: white; font-weight: bold"
-        elif flag == "Decrease vs Prior":
-            styles[flag_idx] = "background-color: #00aa44; color: white; font-weight: bold"
-    except (KeyError, TypeError):
-        pass
-    return styles
-
-# ── Data loaders ──────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_gold():
-    return client.query("""
-        SELECT *
-        FROM `pabst_mis.gold_production_summary`
-        ORDER BY production_month_key, brand
-    """).to_dataframe()
+    client = get_bq_client()
+    q = f"""
+    SELECT
+        Batch_Number, Product_Name, batch_date, batch_sequence,
+        actual_yield, yield_units,
+        roshi_stated_materials_cost, roshi_cost_per_unit,
+        total_recorded_material_cost, total_estimated_missing_cost,
+        total_material_cost_blended,
+        recorded_cost_per_unit, blended_cost_per_unit,
+        prior_batch_number, prior_batch_date,
+        prior_batch_blended_cost, prior_batch_cost_per_unit,
+        pct_vs_prior_batch, dollar_vs_prior_batch,
+        costed_line_count, zero_cost_line_count,
+        total_line_count, line_cost_coverage_pct, dollar_coverage_pct,
+        zero_cost_high_value_line_count, has_zero_cost_high_value_input,
+        max_abs_dollar_var,
+        variance_exception_count, no_po_match_count, variance_flag_count,
+        stale_cost_count, exact_match_count,
+        coverage_status, low_dollar_coverage_flag, low_line_coverage_flag
+    FROM `{PROJECT}.{DATASET}.gold_batch_cost_summary`
+    ORDER BY batch_date DESC NULLS LAST, Batch_Number DESC
+    """
+    return client.query(q).to_dataframe()
 
-@st.cache_data(ttl=3600)
-def load_silver():
-    return client.query("""
-        SELECT
-            Batch_Number, Item_Name, brand, product_line,
-            completed_date, units_produced, cost_per_unit,
-            materials_cost, cost_flag, Location
-        FROM `pabst_mis.silver_production`
-        ORDER BY completed_date DESC
-    """).to_dataframe()
-
-@st.cache_data(ttl=3600)
-def load_sku_cost():
-    return client.query("""
-        SELECT *
-        FROM `pabst_mis.gold_sku_cost_monthly`
-        ORDER BY month_date DESC, materials_cost DESC
-    """).to_dataframe()
-
-@st.cache_data(ttl=3600)
-def load_batch_detail():
-    return client.query("""
-        SELECT *
-        FROM `pabst_mis.gold_batch_cost_detail`
-        ORDER BY completed_date DESC
-    """).to_dataframe()
-
-# ── Cached SKU MoM builder — shared by Tab 3 and Tab 4 ───────────────────────
-@st.cache_data(ttl=3600)
-def build_sku_mom(sku_df, current_month, prior_month, min_units):
-    current = sku_df[sku_df["month"] == current_month].copy()
-    prior = sku_df[sku_df["month"] == prior_month].copy()
-
-    history = sku_df.groupby("sku").agg(
-        cpu_mean=("weighted_cpu", "mean"),
-        cpu_std=("weighted_cpu", "std")
-    ).reset_index()
-
-    merged = current.merge(
-        prior[["sku", "brand", "product_line", "clean_units", "materials_cost", "weighted_cpu"]],
-        on=["sku", "brand", "product_line"],
-        suffixes=("_current", "_prior"),
-        how="left"
+@st.cache_data(ttl=300)
+def load_silver(batch_number: str):
+    client = get_bq_client()
+    q = f"""
+    SELECT
+        rm_item_name, Item_Category, rm_lot_number,
+        qty_consumed, uom, batch_unit_cost, batch_extended_cost,
+        effective_last_po_cost, last_po_date, last_po_supplier,
+        avg_cost_90d, match_status,
+        pct_var_vs_last_po, dollar_var_vs_last_po,
+        pct_var_vs_avg_90d, dollar_var_vs_avg_90d,
+        days_since_last_po, stale_cost_flag,
+        exception_flag, variance_flag,
+        corrupted_unit_cost_flag, extended_cost_mismatch_flag
+    FROM `{PROJECT}.{DATASET}.silver_batch_material_detail`
+    WHERE Batch_Number = @batch
+    ORDER BY batch_extended_cost DESC NULLS LAST
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("batch", "STRING", batch_number)]
     )
-    merged = merged.merge(history, on="sku", how="left")
-    merged = merged[
-        (merged["clean_units_current"] >= min_units) |
-        (merged["clean_units_prior"] >= min_units)
+    return client.query(q, job_config=job_config).to_dataframe()
+
+# ── HELPERS ───────────────────────────────────────────────────────────────────
+def fmt_currency(v, decimals=0):
+    if pd.isna(v): return "—"
+    if decimals == 0:
+        return f"${v:,.0f}"
+    return f"${v:,.{decimals}f}"
+
+def fmt_pct(v, decimals=1):
+    if pd.isna(v): return "—"
+    sign = "+" if v > 0 else ""
+    return f"{sign}{v*100:.{decimals}f}%"
+
+def fmt_num(v, decimals=0):
+    if pd.isna(v): return "—"
+    return f"{v:,.{decimals}f}"
+
+def coverage_badge(status):
+    badges = {
+        "good":     '<span class="badge-good">GOOD</span>',
+        "moderate": '<span class="badge-moderate">MODERATE</span>',
+        "low":      '<span class="badge-low">LOW</span>',
+        "critical": '<span class="badge-critical">CRITICAL</span>',
+    }
+    return badges.get(status, status)
+
+def exception_badge(exc):
+    if pd.isna(exc) or exc == "":
+        return '<span class="exc-ok">✓</span>'
+    badges = {
+        "corrupted_unit_cost":    '<span class="exc-corrupted">CORRUPT</span>',
+        "missing_batch_cost":     '<span class="exc-missing">MISSING</span>',
+        "zero_or_negative_cost":  '<span class="exc-zero">ZERO COST</span>',
+        "variance_above_threshold":'<span class="exc-variance">VARIANCE</span>',
+        "no_po_match":            '<span class="exc-nopo">NO PO</span>',
+    }
+    return badges.get(exc, f'<span class="exc-missing">{exc}</span>')
+
+def var_color_class(v):
+    if pd.isna(v): return "neu-var"
+    return "pos-var" if v > 0 else ("neg-var" if v < 0 else "neu-var")
+
+# ── LOAD DATA ─────────────────────────────────────────────────────────────────
+try:
+    gold = load_gold()
+except Exception as e:
+    st.error(f"BigQuery connection failed: {e}")
+    st.stop()
+
+# ── HEADER ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="pb-header">
+    <span class="pb-title">PabstBrain</span>
+    <span class="pb-subtitle">Production Intelligence</span>
+</div>
+""", unsafe_allow_html=True)
+
+# ── SIDEBAR FILTERS ───────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown('<div class="section-header">Filters</div>', unsafe_allow_html=True)
+
+    products = ["All Products"] + sorted(gold["Product_Name"].dropna().unique().tolist())
+    sel_product = st.selectbox("Product", products)
+
+    coverage_options = ["All", "good", "moderate", "low", "critical"]
+    sel_coverage = st.selectbox("Coverage Status", coverage_options)
+
+    date_range = st.date_input(
+        "Batch Date Range",
+        value=[],
+        help="Leave empty to show all dates"
+    )
+
+    show_exceptions_only = st.checkbox("Exceptions only", value=False)
+
+    st.markdown("---")
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+# ── FILTER DATA ───────────────────────────────────────────────────────────────
+df = gold.copy()
+
+if sel_product != "All Products":
+    df = df[df["Product_Name"] == sel_product]
+
+if sel_coverage != "All":
+    df = df[df["coverage_status"] == sel_coverage]
+
+if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+    df["batch_date"] = pd.to_datetime(df["batch_date"])
+    df = df[
+        (df["batch_date"] >= pd.Timestamp(date_range[0])) &
+        (df["batch_date"] <= pd.Timestamp(date_range[1]))
     ]
-    merged["delta_cpu"] = merged["weighted_cpu_current"] - merged["weighted_cpu_prior"]
-    merged["delta_pct"] = np.where(
-        merged["weighted_cpu_prior"] > 0,
-        (merged["delta_cpu"] / merged["weighted_cpu_prior"] * 100),
-        np.nan
-    )
-    merged["z_score"] = np.where(
-        merged["cpu_std"] > 0,
-        (merged["weighted_cpu_current"] - merged["cpu_mean"]) / merged["cpu_std"],
-        0
-    )
-    merged["cost_flag_anomaly"] = np.where(
-        merged["z_score"] > 2, "🚨 Spike",
-        np.where(merged["z_score"] < -2, "✅ Drop", "Normal")
-    )
-    merged["impact"] = merged["delta_cpu"] * merged["clean_units_current"]
-    return merged
 
-# ── Load data ─────────────────────────────────────────────────────────────────
-df = load_gold()
-silver = load_silver()
-sku_df = load_sku_cost()
-batch_df = load_batch_detail()
+if show_exceptions_only:
+    df = df[
+        (df["variance_exception_count"] > 0) |
+        (df["low_dollar_coverage_flag"] == True) |
+        (df["has_zero_cost_high_value_input"] == True)
+    ]
 
-silver["year"] = pd.to_datetime(silver["completed_date"]).dt.year
-batch_df["completed_date"] = pd.to_datetime(batch_df["completed_date"], errors="coerce")
+# ── KPI ROW ───────────────────────────────────────────────────────────────────
+total_batches   = len(df)
+total_cost      = df["total_material_cost_blended"].sum()
+avg_cpu         = df["blended_cost_per_unit"].median()
+pct_good        = (df["coverage_status"] == "good").mean() * 100
+total_var_flags = df["variance_exception_count"].sum()
 
-# ── Header ────────────────────────────────────────────────────────────────────
-st.title("🏭 Production Intelligence")
-st.caption("Pabst Labs · Materials cost incurred · Data current Jan 2024 – Sep 2025 (Oct 2025–present pending Roshi correction)")
-st.caption("ℹ️ Historical baselines (SKU avg CPU, z-scores) are computed across all dates. Year filter affects display rows only.")
+st.markdown(f"""
+<div class="kpi-row">
+    <div class="kpi-card">
+        <div class="kpi-label">Batches</div>
+        <div class="kpi-value">{total_batches:,}</div>
+        <div class="kpi-sub">in view</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Material Cost</div>
+        <div class="kpi-value">{fmt_currency(total_cost)}</div>
+        <div class="kpi-sub">blended</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Median CPU</div>
+        <div class="kpi-value">{fmt_currency(avg_cpu, 3)}</div>
+        <div class="kpi-sub">blended cost / unit</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Good Coverage</div>
+        <div class="kpi-value">{pct_good:.0f}%</div>
+        <div class="kpi-sub">of batches</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Variance Flags</div>
+        <div class="kpi-value">{int(total_var_flags):,}</div>
+        <div class="kpi-sub">ingredients >10% vs PO</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-st.divider()
-
-# ── Global filters ────────────────────────────────────────────────────────────
-col1, col2, col3 = st.columns(3)
-with col1:
-    brands = ["All Brands"] + sorted(df["brand"].dropna().unique().tolist())
-    selected_brand = st.selectbox("Brand", brands)
-with col2:
-    years = ["All Years"] + sorted(df["production_year"].dropna().unique().tolist(), reverse=True)
-    selected_year = st.selectbox("Year", years)
-with col3:
-    product_lines = ["All Product Lines"] + sorted(df["product_line"].dropna().unique().tolist())
-    selected_line = st.selectbox("Product Line", product_lines)
-
-# ── Apply global filters ──────────────────────────────────────────────────────
-filtered = df.copy()
-if selected_brand != "All Brands":
-    filtered = filtered[filtered["brand"] == selected_brand]
-if selected_year != "All Years":
-    filtered = filtered[filtered["production_year"] == selected_year]
-if selected_line != "All Product Lines":
-    filtered = filtered[filtered["product_line"] == selected_line]
-
-silver_filtered = silver.copy()
-if selected_brand != "All Brands":
-    silver_filtered = silver_filtered[silver_filtered["brand"] == selected_brand]
-if selected_line != "All Product Lines":
-    silver_filtered = silver_filtered[silver_filtered["product_line"] == selected_line]
-if selected_year != "All Years":
-    silver_filtered = silver_filtered[silver_filtered["year"] == int(selected_year)]
-
-st.divider()
-
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Overview",
-    "🔬 Batch Variance",
-    "📈 SKU Cost MoM",
-    "🚨 Cost Anomalies",
-    "📦 Raw Data",
-    "🚚 FG Transfer Readiness"
+# ── TABS ──────────────────────────────────────────────────────────────────────
+tab_summary, tab_drilldown, tab_exceptions = st.tabs([
+    "📋  Batch Summary",
+    "🔬  Batch Drilldown",
+    "⚠️  Exceptions"
 ])
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — OVERVIEW
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.subheader("Production Overview")
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 1 — BATCH SUMMARY
+# ════════════════════════════════════════════════════════════════════════════════
+with tab_summary:
+    st.markdown('<div class="section-header">All Batches</div>', unsafe_allow_html=True)
 
-    total_batches = int(filtered["batch_count"].sum())
-    total_units = int(filtered["total_units"].sum())
-    costed_units = int(filtered["clean_units"].sum())
-    total_cost = filtered["total_materials_cost"].sum()
-    avg_cpu = total_cost / costed_units if costed_units > 0 else 0
-
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Batches", f"{total_batches:,}")
-    k2.metric("Units Produced", f"{total_units:,.0f}")
-    k3.metric("Costed Units", f"{costed_units:,.0f}")
-    k4.metric("Materials Cost Incurred", f"${total_cost:,.0f}")
-    k5.metric("Avg Production Cost / Unit", f"${avg_cpu:.4f}")
-
-    st.divider()
-
-    st.subheader("Units Produced by Month")
-    trend = (
-        filtered.groupby(["production_month_key", "brand"])["total_units"]
-        .sum().reset_index().sort_values("production_month_key")
-    )
-    if not trend.empty:
-        fig = px.bar(
-            trend, x="production_month_key", y="total_units", color="brand",
-            labels={"production_month_key": "Month", "total_units": "Units Produced", "brand": "Brand"},
-            color_discrete_map={"St. Ides": "#C8102E", "Pabst": "#003087", "NYF": "#F5A800"}
-        )
-        fig.update_layout(xaxis_tickangle=-45, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No data for selected filters.")
-
-    st.divider()
-
-    st.subheader("Avg Production Cost / Unit by Month (Weighted)")
-    cost_trend = (
-        filtered[filtered["clean_units"] > 0]
-        .groupby(["production_month_key", "brand"])
-        .agg(total_cost=("total_materials_cost", "sum"), total_units=("clean_units", "sum"))
-        .reset_index().sort_values("production_month_key")
-    )
-    cost_trend["avg_cost_per_unit"] = cost_trend["total_cost"] / cost_trend["total_units"]
-    if not cost_trend.empty:
-        fig2 = px.line(
-            cost_trend, x="production_month_key", y="avg_cost_per_unit", color="brand",
-            labels={"production_month_key": "Month", "avg_cost_per_unit": "Avg Cost / Unit ($)", "brand": "Brand"},
-            color_discrete_map={"St. Ides": "#C8102E", "Pabst": "#003087", "NYF": "#F5A800"}
-        )
-        fig2.update_layout(xaxis_tickangle=-45, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("No cost data for selected filters.")
-
-    st.divider()
-
-    st.subheader("Production by Brand & Product Line")
-    brand_summary = (
-        filtered.groupby(["brand", "product_line"])
-        .agg(batches=("batch_count", "sum"), units=("total_units", "sum"), cost=("total_materials_cost", "sum"))
-        .reset_index().sort_values("units", ascending=False)
-    )
-    brand_summary["cost"] = brand_summary["cost"].map("${:,.0f}".format)
-    brand_summary["units"] = brand_summary["units"].map("{:,.0f}".format)
-    brand_summary.columns = ["Brand", "Product Line", "Batches", "Units Produced", "Materials Cost"]
-    st.dataframe(brand_summary, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    with st.expander("📊 Data Quality & Audit Trail"):
-        st.markdown("**Source:** Roshi `ProductionBatchPerformanceDetail`")
-        st.markdown("**Deduplication:** One row per Package Tag (state compliance ID), most recent export kept")
-        st.markdown("**Corrections applied:** 33 batches corrected per Jason West (Roshi CTO), March 11–13 2026")
-        st.markdown("**Destroyed batch excluded:** PL-MN036 (1 unit produced, immediately destroyed per Mario)")
-        st.markdown("**Estimated cost batch:** PL-CL021 — Cherry Limeade Soda, $0.4917/unit (avg of 21 clean batches, pending Jason confirmation)")
-        st.markdown("**Cost data reliable:** Jan 2024 – Sep 2025. Oct 2025–present pending Roshi correction.")
-        st.markdown("**Zero cost batches:** 101 pre-2024 batches — units visible, cost not available")
-        flag_summary = silver.groupby("cost_flag").agg(
-            batches=("Batch_Number", "count"), units=("units_produced", "sum")
-        ).reset_index()
-        flag_summary.columns = ["Cost Flag", "Batches", "Units"]
-        flag_summary["Units"] = flag_summary["Units"].map("{:,.0f}".format)
-        st.dataframe(flag_summary, use_container_width=True, hide_index=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — BATCH VARIANCE
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    st.subheader("Batch Cost Variance")
-    st.caption("Every batch compared to its prior batch and SKU historical average. Sorted by financial impact.")
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        batch_brand = st.selectbox("Brand", ["All"] + sorted(batch_df["brand"].dropna().unique().tolist()), key="batch_brand")
-    with col2:
-        batch_line = st.selectbox("Product Line", ["All"] + sorted(batch_df["product_line"].dropna().unique().tolist()), key="batch_line")
-    with col3:
-        batch_sku = st.selectbox("SKU", ["All"] + sorted(batch_df["sku"].dropna().unique().tolist()), key="batch_sku")
-    with col4:
-        batch_flag = st.selectbox("Variance Flag", ["All", "Outlier", "Increase vs Prior", "Decrease vs Prior", "Normal"], key="batch_flag")
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        min_units_batch = st.slider("Min Units", 0, int(batch_df["units_produced"].max()), 0, key="batch_min_units")
-    with col_b:
-        min_impact = st.slider("Min |Impact vs Prior| ($)", 0, 50000, 0, step=500, key="batch_min_impact")
-
-    show_outliers_only = st.checkbox("Show Outliers Only", key="batch_outliers_only")
-
-    batch_filtered = batch_df.copy()
-    if batch_brand != "All":
-        batch_filtered = batch_filtered[batch_filtered["brand"] == batch_brand]
-    if batch_line != "All":
-        batch_filtered = batch_filtered[batch_filtered["product_line"] == batch_line]
-    if batch_sku != "All":
-        batch_filtered = batch_filtered[batch_filtered["sku"] == batch_sku]
-    if batch_flag != "All":
-        batch_filtered = batch_filtered[batch_filtered["variance_flag"] == batch_flag]
-    batch_filtered = batch_filtered[batch_filtered["units_produced"] >= min_units_batch]
-    if min_impact > 0:
-        batch_filtered = batch_filtered[batch_filtered["impact_vs_prior"].abs() >= min_impact]
-    if show_outliers_only:
-        batch_filtered = batch_filtered[batch_filtered["variance_flag"] == "Outlier"]
-    if selected_year != "All Years":
-        batch_filtered = batch_filtered[
-            batch_filtered["completed_date"].dt.year == int(selected_year)
-        ]
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Batches", fmt_num(len(batch_filtered)))
-    k2.metric("Avg % vs Prior", fmt_pct(batch_filtered["delta_pct_vs_prior"].mean()) if batch_filtered["delta_pct_vs_prior"].notna().any() else "-")
-    k3.metric("Avg % vs SKU Avg", fmt_pct(batch_filtered["delta_pct_vs_avg"].mean()) if batch_filtered["delta_pct_vs_avg"].notna().any() else "-")
-    k4.metric("Total Impact vs Prior", fmt_usd(batch_filtered["impact_vs_prior"].sum()))
-
-    batch_table = batch_filtered[[
-        "Batch_Number", "sku", "brand", "product_line", "completed_date",
-        "units_produced", "cost_per_unit", "prior_batch_cpu", "delta_pct_vs_prior",
-        "sku_avg_cpu", "delta_pct_vs_avg", "impact_vs_prior", "z_score_cpu",
-        "variance_flag", "cost_flag"
-    ]].copy()
-
-    batch_table = batch_table.sort_values(by="impact_vs_prior", ascending=False, na_position="last")
-    batch_table["units_produced"] = batch_table["units_produced"].apply(fmt_num)
-    batch_table["cost_per_unit"] = batch_table["cost_per_unit"].apply(lambda x: fmt_usd(x, 4))
-    batch_table["prior_batch_cpu"] = batch_table["prior_batch_cpu"].apply(lambda x: fmt_usd(x, 4))
-    batch_table["delta_pct_vs_prior"] = batch_table["delta_pct_vs_prior"].apply(fmt_pct)
-    batch_table["sku_avg_cpu"] = batch_table["sku_avg_cpu"].apply(lambda x: fmt_usd(x, 4))
-    batch_table["delta_pct_vs_avg"] = batch_table["delta_pct_vs_avg"].apply(fmt_pct)
-    batch_table["impact_vs_prior"] = batch_table["impact_vs_prior"].apply(fmt_usd)
-    batch_table["z_score_cpu"] = batch_table["z_score_cpu"].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "-")
-    batch_table.columns = [
-        "Batch", "SKU", "Brand", "Product Line", "Completed",
-        "Units", "CPU", "Prior Batch CPU", "% vs Prior",
-        "SKU Avg CPU", "% vs Avg", "Impact vs Prior", "Z-Score",
-        "Variance Flag", "Cost Flag"
-    ]
-
-    st.dataframe(
-        batch_table.style.apply(highlight_variance_flag, axis=1),
-        use_container_width=True, height=500
-    )
-
-    st.divider()
-    st.subheader("🔎 SKU Batch Drilldown")
-
-    selected_sku_drill = st.selectbox(
-        "Select SKU to investigate",
-        sorted(batch_df["sku"].dropna().unique().tolist()),
-        key="sku_drill"
-    )
-
-    drill_df = batch_df[batch_df["sku"] == selected_sku_drill].sort_values("completed_date")
-
-    if not drill_df.empty:
-        d1, d2, d3, d4 = st.columns(4)
-        d1.metric("SKU Avg CPU", fmt_usd(drill_df["sku_avg_cpu"].iloc[0], 4))
-        d2.metric("Latest CPU", fmt_usd(drill_df["cost_per_unit"].iloc[-1], 4))
-        d3.metric("Latest Z-Score", f"{drill_df['z_score_cpu'].iloc[-1]:.2f}" if pd.notnull(drill_df['z_score_cpu'].iloc[-1]) else "-")
-        d4.metric("Latest Flag", drill_df["variance_flag"].iloc[-1])
-
-        fig_drill = px.line(
-            drill_df.dropna(subset=["cost_per_unit"]),
-            x="completed_date", y="cost_per_unit",
-            markers=True,
-            labels={"completed_date": "Date", "cost_per_unit": "Cost/Unit ($)"},
-            title=f"{selected_sku_drill} — Batch Cost Trend"
-        )
-        fig_drill.add_hline(
-            y=drill_df["sku_avg_cpu"].iloc[0],
-            line_dash="dash", line_color="gray",
-            annotation_text="SKU Avg"
-        )
-        fig_drill.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_drill, use_container_width=True)
-
-        drill_table = drill_df[[
-            "Batch_Number", "completed_date", "units_produced", "cost_per_unit",
-            "prior_batch_cpu", "delta_pct_vs_prior", "sku_avg_cpu",
-            "delta_pct_vs_avg", "impact_vs_prior", "variance_flag", "cost_flag"
-        ]].copy().sort_values("completed_date", ascending=False)
-
-        drill_table["units_produced"] = drill_table["units_produced"].apply(fmt_num)
-        drill_table["cost_per_unit"] = drill_table["cost_per_unit"].apply(lambda x: fmt_usd(x, 4))
-        drill_table["prior_batch_cpu"] = drill_table["prior_batch_cpu"].apply(lambda x: fmt_usd(x, 4))
-        drill_table["delta_pct_vs_prior"] = drill_table["delta_pct_vs_prior"].apply(fmt_pct)
-        drill_table["sku_avg_cpu"] = drill_table["sku_avg_cpu"].apply(lambda x: fmt_usd(x, 4))
-        drill_table["delta_pct_vs_avg"] = drill_table["delta_pct_vs_avg"].apply(fmt_pct)
-        drill_table["impact_vs_prior"] = drill_table["impact_vs_prior"].apply(fmt_usd)
-        drill_table.columns = [
-            "Batch", "Completed", "Units", "CPU", "Prior CPU",
-            "% vs Prior", "SKU Avg CPU", "% vs Avg",
-            "Impact vs Prior", "Variance Flag", "Cost Flag"
-        ]
-        st.dataframe(
-            drill_table.style.apply(highlight_variance_flag, axis=1),
-            use_container_width=True, height=350
-        )
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — SKU COST MOM
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab3:
-    st.subheader("SKU Cost — Month over Month")
-    st.caption("$ Impact = Δ CPU × current clean units. Baselines computed across full history.")
-
-    available_months = sorted(sku_df["month"].unique().tolist(), reverse=True)
-    col_m1, col_m2, col_m3 = st.columns(3)
-    with col_m1:
-        current_month = st.selectbox("Current Month", available_months, index=0)
-    with col_m2:
-        prior_index = 1 if len(available_months) > 1 else 0
-        prior_month = st.selectbox("Prior Month", available_months, index=prior_index)
-    with col_m3:
-        min_units = st.slider("Min Units Filter", 0, 500, 100)
-
-    if current_month == prior_month:
-        st.warning("Current Month and Prior Month are the same. Select different months for a meaningful comparison.")
-
-    merged = build_sku_mom(sku_df, current_month, prior_month, min_units)
-
-    merged_display = merged.copy()
-    if selected_brand != "All Brands":
-        merged_display = merged_display[merged_display["brand"] == selected_brand]
-    if selected_line != "All Product Lines":
-        merged_display = merged_display[merged_display["product_line"] == selected_line]
-
-    show_flagged_only = st.checkbox("Show only Spike / Drop flagged SKUs", key="mom_flagged_only")
-    if show_flagged_only:
-        merged_display = merged_display[merged_display["cost_flag_anomaly"] != "Normal"]
-
-    mom_display = merged_display[[
-        "sku", "brand", "product_line",
-        "clean_units_current", "weighted_cpu_current",
-        "clean_units_prior", "weighted_cpu_prior",
-        "materials_cost_current", "materials_cost_prior",
-        "delta_cpu", "delta_pct", "impact", "cost_flag_anomaly"
-    ]].copy()
-
-    mom_display = mom_display.sort_values(by="impact", ascending=False)
-    mom_display.columns = [
-        "SKU", "Brand", "Product Line",
-        "Units (Current)", "CPU (Current)",
-        "Units (Prior)", "CPU (Prior)",
-        "Cost (Current)", "Cost (Prior)",
-        "Δ CPU ($)", "Δ %", "$ Impact", "Flag"
-    ]
-
-    mom_display["Units (Current)"] = mom_display["Units (Current)"].map("{:,.0f}".format)
-    mom_display["Units (Prior)"] = mom_display["Units (Prior)"].map("{:,.0f}".format)
-    mom_display["CPU (Current)"] = mom_display["CPU (Current)"].map("${:.4f}".format)
-    mom_display["CPU (Prior)"] = mom_display["CPU (Prior)"].map("${:.4f}".format)
-    mom_display["Cost (Current)"] = mom_display["Cost (Current)"].map("${:,.0f}".format)
-    mom_display["Cost (Prior)"] = mom_display["Cost (Prior)"].map("${:,.0f}".format)
-    mom_display["Δ CPU ($)"] = mom_display["Δ CPU ($)"].map("${:+.4f}".format)
-    mom_display["Δ %"] = mom_display["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
-    mom_display["$ Impact"] = mom_display["$ Impact"].map("${:+,.0f}".format)
-
-    st.dataframe(mom_display, use_container_width=True, hide_index=True)
-
-    valid_prior = merged_display[
-        merged_display["weighted_cpu_prior"].notna() &
-        (merged_display["weighted_cpu_prior"] > 0)
-    ].copy()
-
-    col_inc, col_dec = st.columns(2)
-    with col_inc:
-        st.markdown("**Top 5 Cost Increases (by $ Impact)**")
-        top_increases = valid_prior.nlargest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
-        top_increases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
-        top_increases["CPU (Current)"] = top_increases["CPU (Current)"].map("${:.4f}".format)
-        top_increases["CPU (Prior)"] = top_increases["CPU (Prior)"].map("${:.4f}".format)
-        top_increases["Δ %"] = top_increases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
-        top_increases["$ Impact"] = top_increases["$ Impact"].map("${:+,.0f}".format)
-        st.dataframe(top_increases, use_container_width=True, hide_index=True)
-
-    with col_dec:
-        st.markdown("**Top 5 Cost Decreases (by $ Impact)**")
-        top_decreases = valid_prior.nsmallest(5, "impact")[["sku", "brand", "weighted_cpu_current", "weighted_cpu_prior", "delta_pct", "impact"]].copy()
-        top_decreases.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Prior)", "Δ %", "$ Impact"]
-        top_decreases["CPU (Current)"] = top_decreases["CPU (Current)"].map("${:.4f}".format)
-        top_decreases["CPU (Prior)"] = top_decreases["CPU (Prior)"].map("${:.4f}".format)
-        top_decreases["Δ %"] = top_decreases["Δ %"].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "NEW")
-        top_decreases["$ Impact"] = top_decreases["$ Impact"].map("${:+,.0f}".format)
-        st.dataframe(top_decreases, use_container_width=True, hide_index=True)
-
-    st.divider()
-    st.subheader("🔍 SKU Drilldown")
-
-    drill_source = st.radio(
-        "Select SKU from:",
-        ["Top 5 Increases", "Top 5 Decreases", "All SKUs"],
+    sort_col = st.selectbox(
+        "Sort by",
+        ["batch_date", "total_material_cost_blended", "pct_vs_prior_batch",
+         "blended_cost_per_unit", "dollar_coverage_pct"],
+        format_func=lambda x: {
+            "batch_date": "Batch Date",
+            "total_material_cost_blended": "Total Material Cost",
+            "pct_vs_prior_batch": "% vs Prior Batch",
+            "blended_cost_per_unit": "Cost Per Unit",
+            "dollar_coverage_pct": "Coverage %",
+        }[x],
         horizontal=True
     )
 
-    if drill_source == "Top 5 Increases":
-        drill_options = valid_prior.nlargest(5, "impact")["sku"].tolist()
-    elif drill_source == "Top 5 Decreases":
-        drill_options = valid_prior.nsmallest(5, "impact")["sku"].tolist()
-    else:
-        drill_options = sorted(merged_display["sku"].unique().tolist())
+    sort_asc = st.checkbox("Ascending", value=False)
+    df_sorted = df.sort_values(sort_col, ascending=sort_asc, na_position="last")
 
-    if drill_options:
-        selected_sku = st.selectbox("Select SKU", drill_options)
-        sku_row_df = merged_display[merged_display["sku"] == selected_sku]
+    # Build display table
+    rows = []
+    for _, r in df_sorted.iterrows():
+        pct_var = r["pct_vs_prior_batch"]
+        var_class = var_color_class(pct_var)
+        pct_str = fmt_pct(pct_var) if not pd.isna(pct_var) else "—"
 
-        if not sku_row_df.empty:
-            sku_row = sku_row_df.iloc[0]
-            d1, d2, d3, d4, d5 = st.columns(5)
-            d1.metric("Brand", sku_row["brand"])
-            d2.metric("CPU (Current)", f"${sku_row['weighted_cpu_current']:.4f}")
-            d3.metric("CPU (Prior)", f"${sku_row['weighted_cpu_prior']:.4f}" if pd.notna(sku_row['weighted_cpu_prior']) else "N/A")
-            d4.metric("Z-Score", f"{sku_row['z_score']:.2f}")
-            d5.metric("Anomaly", sku_row["cost_flag_anomaly"])
+        rows.append({
+            "Batch": r["Batch_Number"],
+            "Product": r["Product_Name"],
+            "Date": str(r["batch_date"])[:10] if pd.notna(r["batch_date"]) else "—",
+            "Yield": f"{fmt_num(r['actual_yield'])} {r['yield_units'] or ''}".strip(),
+            "Material Cost": fmt_currency(r["total_material_cost_blended"]),
+            "CPU (Blended)": fmt_currency(r["blended_cost_per_unit"], 3),
+            "vs Prior Batch": pct_str,
+            "$ vs Prior": fmt_currency(r["dollar_vs_prior_batch"]),
+            "Coverage": r["coverage_status"],
+            "Costed Lines": f"{int(r['costed_line_count'])}/{int(r['total_line_count'])}",
+            "Var Flags": int(r["variance_exception_count"]),
+            "THC Zero Cost": "⚠️" if r["has_zero_cost_high_value_input"] else "",
+        })
 
-            sku_history = sku_df[sku_df["sku"] == selected_sku].sort_values("month")
-            if not sku_history.empty:
-                fig_sku = px.line(
-                    sku_history, x="month", y="weighted_cpu",
-                    markers=True,
-                    labels={"month": "Month", "weighted_cpu": "Weighted CPU ($)"},
-                    title=f"Monthly Cost Trend — {selected_sku}"
-                )
-                fig_sku.update_layout(xaxis_tickangle=-45, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_sku, use_container_width=True)
+    display_df = pd.DataFrame(rows)
 
-            # Use batch_df for drilldown — richer than silver
-            sku_batches = batch_df[
-                (batch_df["sku"] == selected_sku) &
-                (batch_df["completed_date"].dt.strftime("%Y-%m").isin([current_month, prior_month]))
-            ].copy()
+    def color_coverage(val):
+        colors = {
+            "good": "color: #3fb950",
+            "moderate": "color: #d29922",
+            "low": "color: #f0883e",
+            "critical": "color: #f85149",
+        }
+        return colors.get(val, "")
 
-            if not sku_batches.empty:
-                sku_batches["month"] = sku_batches["completed_date"].dt.strftime("%Y-%m")
-                drill_batch = sku_batches[[
-                    "Batch_Number", "month", "completed_date", "units_produced",
-                    "cost_per_unit", "prior_batch_cpu", "delta_pct_vs_prior",
-                    "sku_avg_cpu", "delta_pct_vs_avg", "impact_vs_prior",
-                    "variance_flag", "cost_flag"
-                ]].copy().sort_values("completed_date", ascending=False)
+    def color_variance(val):
+        if val == "—": return ""
+        try:
+            num = float(val.replace("+","").replace("%",""))
+            if num > 10: return "color: #f85149"
+            if num > 5: return "color: #f0883e"
+            if num < -5: return "color: #3fb950"
+        except: pass
+        return ""
 
-                drill_batch["units_produced"] = drill_batch["units_produced"].apply(fmt_num)
-                drill_batch["cost_per_unit"] = drill_batch["cost_per_unit"].apply(lambda x: fmt_usd(x, 4))
-                drill_batch["prior_batch_cpu"] = drill_batch["prior_batch_cpu"].apply(lambda x: fmt_usd(x, 4))
-                drill_batch["delta_pct_vs_prior"] = drill_batch["delta_pct_vs_prior"].apply(fmt_pct)
-                drill_batch["sku_avg_cpu"] = drill_batch["sku_avg_cpu"].apply(lambda x: fmt_usd(x, 4))
-                drill_batch["delta_pct_vs_avg"] = drill_batch["delta_pct_vs_avg"].apply(fmt_pct)
-                drill_batch["impact_vs_prior"] = drill_batch["impact_vs_prior"].apply(fmt_usd)
+    styled = display_df.style\
+        .applymap(color_coverage, subset=["Coverage"])\
+        .applymap(color_variance, subset=["vs Prior Batch"])\
+        .set_properties(**{
+            "font-family": "DM Mono, monospace",
+            "font-size": "12px",
+        })
 
-                drill_batch.columns = [
-                    "Batch", "Month", "Completed", "Units", "CPU",
-                    "Prior CPU", "% vs Prior", "SKU Avg CPU", "% vs Avg",
-                    "Impact vs Prior", "Variance Flag", "Cost Flag"
-                ]
-                st.markdown(f"**Batch Detail — {selected_sku} ({prior_month} & {current_month})**")
-                st.dataframe(
-                    drill_batch.style.apply(highlight_variance_flag, axis=1),
-                    use_container_width=True, hide_index=True
-                )
-            else:
-                st.info("No batch detail available for this SKU in the selected months.")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — COST ANOMALIES
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab4:
-    st.subheader("🚨 Cost Anomalies — Statistical Detection")
-    st.caption("SKUs where current cost is statistically abnormal vs their own history. Z-score > 2 = spike. Z-score < -2 = drop.")
-
-    available_months_t4 = sorted(sku_df["month"].unique().tolist(), reverse=True)
-    col_t4a, col_t4b, col_t4c = st.columns(3)
-    with col_t4a:
-        anomaly_current = st.selectbox("Current Month", available_months_t4, index=0, key="anomaly_current")
-    with col_t4b:
-        anomaly_prior_idx = 1 if len(available_months_t4) > 1 else 0
-        anomaly_prior = st.selectbox("Prior Month", available_months_t4, index=anomaly_prior_idx, key="anomaly_prior")
-    with col_t4c:
-        anomaly_min_units = st.slider("Min Units", 0, 500, 100, key="anomaly_min_units")
-
-    anomaly_merged = build_sku_mom(sku_df, anomaly_current, anomaly_prior, anomaly_min_units)
-
-    if selected_brand != "All Brands":
-        anomaly_merged = anomaly_merged[anomaly_merged["brand"] == selected_brand]
-    if selected_line != "All Product Lines":
-        anomaly_merged = anomaly_merged[anomaly_merged["product_line"] == selected_line]
-
-    anomalies = anomaly_merged[anomaly_merged["cost_flag_anomaly"] != "Normal"].copy()
-    anomalies = anomalies.sort_values(by="z_score", ascending=False)
-
-    if not anomalies.empty:
-        anomalies_display = anomalies[[
-            "sku", "brand", "weighted_cpu_current", "cpu_mean", "z_score", "cost_flag_anomaly"
-        ]].copy()
-        anomalies_display.columns = ["SKU", "Brand", "CPU (Current)", "CPU (Historical Avg)", "Z-Score", "Flag"]
-        anomalies_display["CPU (Current)"] = anomalies_display["CPU (Current)"].map("${:.4f}".format)
-        anomalies_display["CPU (Historical Avg)"] = anomalies_display["CPU (Historical Avg)"].map("${:.4f}".format)
-        anomalies_display["Z-Score"] = anomalies_display["Z-Score"].map("{:.2f}".format)
-        st.dataframe(anomalies_display, use_container_width=True, hide_index=True)
-    else:
-        st.success("No cost anomalies detected for the selected period and filters.")
-
-    st.divider()
-    st.subheader("Batch-Level Outliers")
-    st.caption("Batches flagged as statistical outliers vs their SKU historical average.")
-
-    batch_outliers = batch_df[batch_df["variance_flag"] == "Outlier"].copy()
-    if selected_brand != "All Brands":
-        batch_outliers = batch_outliers[batch_outliers["brand"] == selected_brand]
-    if selected_line != "All Product Lines":
-        batch_outliers = batch_outliers[batch_outliers["product_line"] == selected_line]
-    if selected_year != "All Years":
-        batch_outliers = batch_outliers[batch_outliers["completed_date"].dt.year == int(selected_year)]
-
-    if not batch_outliers.empty:
-        bo_display = batch_outliers[[
-            "Batch_Number", "sku", "brand", "completed_date",
-            "units_produced", "cost_per_unit", "sku_avg_cpu",
-            "delta_pct_vs_avg", "z_score_cpu", "impact_vs_prior"
-        ]].copy().sort_values("z_score_cpu", ascending=False)
-
-        bo_display["units_produced"] = bo_display["units_produced"].apply(fmt_num)
-        bo_display["cost_per_unit"] = bo_display["cost_per_unit"].apply(lambda x: fmt_usd(x, 4))
-        bo_display["sku_avg_cpu"] = bo_display["sku_avg_cpu"].apply(lambda x: fmt_usd(x, 4))
-        bo_display["delta_pct_vs_avg"] = bo_display["delta_pct_vs_avg"].apply(fmt_pct)
-        bo_display["z_score_cpu"] = bo_display["z_score_cpu"].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "-")
-        bo_display["impact_vs_prior"] = bo_display["impact_vs_prior"].apply(fmt_usd)
-        bo_display.columns = ["Batch", "SKU", "Brand", "Completed", "Units", "CPU", "SKU Avg CPU", "% vs Avg", "Z-Score", "Impact vs Prior"]
-        st.dataframe(bo_display, use_container_width=True, hide_index=True)
-    else:
-        st.success("No batch-level outliers for selected filters.")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — RAW DATA
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab5:
-    st.subheader("Raw Data")
-
-    raw_choice = st.selectbox(
-        "Select Dataset",
-        ["Production Batches (Silver)", "Batch Variance Detail", "SKU Monthly Cost"],
-        key="raw_choice"
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        height=600,
+        hide_index=True,
     )
 
-    if raw_choice == "Production Batches (Silver)":
-        raw_data = silver_filtered.copy()
-        filename = "production_batches.csv"
-    elif raw_choice == "Batch Variance Detail":
-        raw_data = batch_df.copy()
-        if selected_brand != "All Brands":
-            raw_data = raw_data[raw_data["brand"] == selected_brand]
-        if selected_year != "All Years":
-            raw_data = raw_data[raw_data["completed_date"].dt.year == int(selected_year)]
-        filename = "batch_variance.csv"
+    st.caption(f"Showing {len(df_sorted):,} batches · Material cost = recorded + estimated missing (exact PO match only)")
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 2 — BATCH DRILLDOWN
+# ════════════════════════════════════════════════════════════════════════════════
+with tab_drilldown:
+    col_sel, col_info = st.columns([1, 2])
+
+    with col_sel:
+        st.markdown('<div class="section-header">Select Batch</div>', unsafe_allow_html=True)
+
+        batch_options = df_sorted["Batch_Number"].tolist()
+        if not batch_options:
+            st.warning("No batches match current filters.")
+            st.stop()
+
+        sel_batch = st.selectbox(
+            "Batch",
+            batch_options,
+            format_func=lambda b: f"{b} — {df[df['Batch_Number']==b]['Product_Name'].values[0]}"
+                if b in df["Batch_Number"].values else b
+        )
+
+    # Batch header info
+    batch_row = df[df["Batch_Number"] == sel_batch]
+    if batch_row.empty:
+        st.warning("Batch not found.")
     else:
-        raw_data = sku_df.copy()
-        filename = "sku_cost_monthly.csv"
+        br = batch_row.iloc[0]
 
-    st.caption(f"{len(raw_data):,} rows")
-    st.dataframe(raw_data, use_container_width=True, height=500)
-    st.download_button("⬇️ Download CSV", raw_data.to_csv(index=False), filename, "text/csv")
+        with col_info:
+            st.markdown('<div class="section-header">Batch Summary</div>', unsafe_allow_html=True)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Material Cost", fmt_currency(br["total_material_cost_blended"]),
+                      delta=fmt_currency(br["dollar_vs_prior_batch"]) if pd.notna(br["dollar_vs_prior_batch"]) else None)
+            c2.metric("Cost / Unit", fmt_currency(br["blended_cost_per_unit"], 3),
+                      delta=fmt_pct(br["pct_vs_prior_batch"]) if pd.notna(br["pct_vs_prior_batch"]) else None)
+            c3.metric("Yield", f"{fmt_num(br['actual_yield'])} {br['yield_units'] or ''}".strip())
+            c4.metric("Coverage", f"{br['dollar_coverage_pct']*100:.0f}%" if pd.notna(br["dollar_coverage_pct"]) else "—")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — FG TRANSFER READINESS
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab6:
-    st.subheader("📦 FG Transfer Readiness")
-    st.info(
-        "FIFO inventory layer and finished goods transfer readiness are pending inventory system integration. "
-        "This section will show units available by SKU, oldest batch first, and estimated transfer value "
-        "once the inventory layer is complete."
-    )
-    with st.expander("🏗️ What This Will Show"):
-        st.markdown("""
-        **When built, this tab will display:**
-        - Finished goods on hand by SKU (units produced minus units transferred to Nabis)
-        - Oldest available batch first (FIFO sequencing)
-        - Units available for transfer by SKU
-        - Estimated transfer value at standard cost
-        - Age of finished goods in days
-        - Blocked or flagged inventory
+        # Load ingredient detail
+        with st.spinner("Loading ingredient detail..."):
+            silver = load_silver(sel_batch)
 
-        **Data dependencies:**
-        - Roshi batch transfer records
-        - Nabis transfer confirmation data
-        - IES inventory valuation (once live)
-        """)
+        if silver.empty:
+            st.warning("No ingredient data found for this batch.")
+        else:
+            st.markdown('<div class="section-header">Raw Material Detail</div>', unsafe_allow_html=True)
+
+            # Ingredient filters
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                cats = ["All"] + sorted(silver["Item_Category"].dropna().unique().tolist())
+                sel_cat = st.selectbox("Category", cats, key="cat_filter")
+            with fc2:
+                exc_types = ["All", "Exceptions only", "Clean only"]
+                sel_exc = st.selectbox("Show", exc_types, key="exc_filter")
+
+            s = silver.copy()
+            if sel_cat != "All":
+                s = s[s["Item_Category"] == sel_cat]
+            if sel_exc == "Exceptions only":
+                s = s[s["exception_flag"].notna() & (s["exception_flag"] != "")]
+            elif sel_exc == "Clean only":
+                s = s[s["exception_flag"].isna() | (s["exception_flag"] == "")]
+
+            # Build ingredient display
+            ingredient_rows = []
+            for _, row in s.iterrows():
+                pct_var = row["pct_var_vs_last_po"]
+                dollar_var = row["dollar_var_vs_last_po"]
+                var_class = var_color_class(pct_var)
+
+                ingredient_rows.append({
+                    "Ingredient": row["rm_item_name"],
+                    "Category": row["Item_Category"] or "—",
+                    "Lot": row["rm_lot_number"] or "—",
+                    "Qty": f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
+                    "Batch Cost/Unit": fmt_currency(row["batch_unit_cost"], 4) if pd.notna(row["batch_unit_cost"]) else "—",
+                    "Extended Cost": fmt_currency(row["batch_extended_cost"], 2) if pd.notna(row["batch_extended_cost"]) else "—",
+                    "Last PO Cost": fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else "—",
+                    "% vs PO": fmt_pct(pct_var) if pd.notna(pct_var) else "—",
+                    "$ vs PO": fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "—",
+                    "PO Date": str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "—",
+                    "Match": row["match_status"] or "—",
+                    "Flag": row["exception_flag"] or "",
+                })
+
+            ing_df = pd.DataFrame(ingredient_rows)
+
+            def color_pct_var(val):
+                if val == "—": return ""
+                try:
+                    num = float(val.replace("+","").replace("%",""))
+                    if num > 10: return "color: #f85149; font-weight: 600"
+                    if num > 5:  return "color: #f0883e"
+                    if num < -5: return "color: #3fb950"
+                except: pass
+                return ""
+
+            def color_flag(val):
+                colors = {
+                    "corrupted_unit_cost":     "color: #d2a8ff; background: #3d1a6e",
+                    "missing_batch_cost":      "color: #79c0ff; background: #1a2332",
+                    "zero_or_negative_cost":   "color: #f0883e; background: #2d1b00",
+                    "variance_above_threshold":"color: #f85149; background: #3d0c0c",
+                    "no_po_match":             "color: #d29922; background: #2d2006",
+                }
+                return colors.get(val, "")
+
+            styled_ing = ing_df.style\
+                .applymap(color_pct_var, subset=["% vs PO"])\
+                .applymap(color_flag, subset=["Flag"])\
+                .set_properties(**{
+                    "font-family": "DM Mono, monospace",
+                    "font-size": "11px",
+                })
+
+            st.dataframe(
+                styled_ing,
+                use_container_width=True,
+                height=500,
+                hide_index=True,
+            )
+
+            # Summary below table
+            total_ext = s["batch_extended_cost"].sum()
+            total_var  = s["dollar_var_vs_last_po"].sum()
+            n_flags    = s["exception_flag"].notna().sum()
+            n_no_po    = (s["exception_flag"] == "no_po_match").sum()
+
+            st.markdown("---")
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("Ingredients Shown", len(s))
+            sc2.metric("Extended Cost", fmt_currency(total_ext))
+            sc3.metric("Total $ vs PO", fmt_currency(total_var, 2))
+            sc4.metric("Exception Lines", int(n_flags))
+
+            if br["prior_batch_number"]:
+                st.caption(
+                    f"Prior batch: **{br['prior_batch_number']}** "
+                    f"({str(br['prior_batch_date'])[:10] if pd.notna(br['prior_batch_date']) else '—'}) · "
+                    f"Cost: {fmt_currency(br['prior_batch_blended_cost'])} · "
+                    f"CPU: {fmt_currency(br['prior_batch_cost_per_unit'], 3)}"
+                )
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 3 — EXCEPTIONS
+# ════════════════════════════════════════════════════════════════════════════════
+with tab_exceptions:
+    st.markdown('<div class="section-header">Batches Requiring Attention</div>', unsafe_allow_html=True)
+
+    ec1, ec2, ec3 = st.columns(3)
+
+    with ec1:
+        st.markdown("**🔴 Low / Critical Coverage**")
+        low_cov = df[df["coverage_status"].isin(["low","critical"])]\
+            [["Batch_Number","Product_Name","batch_date","dollar_coverage_pct","zero_cost_high_value_line_count"]]\
+            .copy()
+        low_cov["Coverage %"] = (low_cov["dollar_coverage_pct"] * 100).round(1).astype(str) + "%"
+        low_cov["THC Zero"] = low_cov["zero_cost_high_value_line_count"].apply(lambda x: "⚠️" if x > 0 else "")
+        low_cov["Date"] = low_cov["batch_date"].astype(str).str[:10]
+        st.dataframe(
+            low_cov[["Batch_Number","Product_Name","Date","Coverage %","THC Zero"]].rename(columns={"Batch_Number":"Batch","Product_Name":"Product"}),
+            use_container_width=True,
+            hide_index=True,
+            height=350,
+        )
+
+    with ec2:
+        st.markdown("**🟠 High Variance Batches**")
+        hi_var = df[df["variance_exception_count"] > 0]\
+            [["Batch_Number","Product_Name","batch_date","variance_exception_count","max_abs_dollar_var"]]\
+            .sort_values("max_abs_dollar_var", ascending=False).copy()
+        hi_var["Date"] = hi_var["batch_date"].astype(str).str[:10]
+        hi_var["Max $ Var"] = hi_var["max_abs_dollar_var"].apply(fmt_currency)
+        hi_var["# Flags"] = hi_var["variance_exception_count"].astype(int)
+        st.dataframe(
+            hi_var[["Batch_Number","Product_Name","Date","# Flags","Max $ Var"]].rename(columns={"Batch_Number":"Batch","Product_Name":"Product"}),
+            use_container_width=True,
+            hide_index=True,
+            height=350,
+        )
+
+    with ec3:
+        st.markdown("**🟡 THC / High-Value Zero Cost**")
+        thc_zero = df[df["has_zero_cost_high_value_input"] == True]\
+            [["Batch_Number","Product_Name","batch_date","zero_cost_high_value_line_count","total_estimated_missing_cost"]]\
+            .copy()
+        thc_zero["Date"] = thc_zero["batch_date"].astype(str).str[:10]
+        thc_zero["Zero Lines"] = thc_zero["zero_cost_high_value_line_count"].astype(int)
+        thc_zero["Est. Exposure"] = thc_zero["total_estimated_missing_cost"].apply(fmt_currency)
+        st.dataframe(
+            thc_zero[["Batch_Number","Product_Name","Date","Zero Lines","Est. Exposure"]].rename(columns={"Batch_Number":"Batch","Product_Name":"Product"}),
+            use_container_width=True,
+            hide_index=True,
+            height=350,
+        )
+
+    st.markdown('<div class="section-header">Cost Trend by Product</div>', unsafe_allow_html=True)
+
+    trend_products = sorted(df["Product_Name"].dropna().unique().tolist())
+    sel_trend = st.selectbox("Product", trend_products, key="trend_product")
+
+    trend_df = df[df["Product_Name"] == sel_trend].sort_values("batch_date").copy()
+    trend_df = trend_df[trend_df["blended_cost_per_unit"].notna()]
+
+    if len(trend_df) > 1:
+        chart_data = trend_df[["batch_date","blended_cost_per_unit","total_material_cost_blended"]].copy()
+        chart_data = chart_data.rename(columns={
+            "batch_date": "Date",
+            "blended_cost_per_unit": "Cost Per Unit ($)",
+            "total_material_cost_blended": "Total Batch Cost ($)"
+        }).set_index("Date")
+        st.line_chart(chart_data[["Cost Per Unit ($)"]], use_container_width=True, height=250)
+    else:
+        st.info("Need at least 2 batches to show trend.")
