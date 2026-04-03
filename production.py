@@ -7,7 +7,7 @@ import os
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="PabstBrain — Production",
+    page_title="PabstBrain -- Production",
     page_icon="🏭",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -249,18 +249,18 @@ def load_silver(batch_number: str):
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def fmt_currency(v, decimals=0):
-    if pd.isna(v): return "—"
+    if pd.isna(v): return "--"
     if decimals == 0:
         return f"${v:,.0f}"
     return f"${v:,.{decimals}f}"
 
 def fmt_pct(v, decimals=1):
-    if pd.isna(v): return "—"
+    if pd.isna(v): return "--"
     sign = "+" if v > 0 else ""
     return f"{sign}{v*100:.{decimals}f}%"
 
 def fmt_num(v, decimals=0):
-    if pd.isna(v): return "—"
+    if pd.isna(v): return "--"
     return f"{v:,.{decimals}f}"
 
 def coverage_badge(status):
@@ -394,7 +394,7 @@ tab_summary, tab_drilldown, tab_exceptions = st.tabs([
 ])
 
 # ════════════════════════════════════════════════════════════════════════════════
-# TAB 1 — BATCH SUMMARY
+# TAB 1 -- BATCH SUMMARY
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_summary:
     st.markdown('<div class="section-header">All Batches</div>', unsafe_allow_html=True)
@@ -420,12 +420,12 @@ with tab_summary:
     for _, r in df_sorted.iterrows():
         pct_var = r["pct_vs_prior_batch"]
         var_class = var_color_class(pct_var)
-        pct_str = fmt_pct(pct_var) if not pd.isna(pct_var) else "—"
+        pct_str = fmt_pct(pct_var) if not pd.isna(pct_var) else "--"
 
         rows.append({
             "Batch": r["Batch_Number"],
             "Product": r["Product_Name"],
-            "Date": str(r["batch_date"])[:10] if pd.notna(r["batch_date"]) else "—",
+            "Date": str(r["batch_date"])[:10] if pd.notna(r["batch_date"]) else "--",
             "Yield": f"{fmt_num(r['actual_yield'])} {r['yield_units'] or ''}".strip(),
             "Material Cost": fmt_currency(r["total_material_cost_blended"]),
             "CPU (Blended)": fmt_currency(r["blended_cost_per_unit"], 3),
@@ -449,7 +449,7 @@ with tab_summary:
         return colors.get(val, "")
 
     def color_variance(val):
-        if val == "—": return ""
+        if val == "--": return ""
         try:
             num = float(val.replace("+","").replace("%",""))
             if num > 10: return "color: #f85149"
@@ -476,7 +476,7 @@ with tab_summary:
     st.caption(f"Showing {len(df_sorted):,} batches · Material cost = recorded + estimated missing (exact PO match only)")
 
 # ════════════════════════════════════════════════════════════════════════════════
-# TAB 2 — BATCH DRILLDOWN
+# TAB 2 -- BATCH DRILLDOWN
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_drilldown:
     col_sel, col_info = st.columns([1, 2])
@@ -492,7 +492,7 @@ with tab_drilldown:
         sel_batch = st.selectbox(
             "Batch",
             batch_options,
-            format_func=lambda b: f"{b} — {df[df['Batch_Number']==b]['Product_Name'].values[0]}"
+            format_func=lambda b: f"{b} -- {df[df['Batch_Number']==b]['Product_Name'].values[0]}"
                 if b in df["Batch_Number"].values else b
         )
 
@@ -511,7 +511,7 @@ with tab_drilldown:
             c2.metric("Cost / Unit", fmt_currency(br["blended_cost_per_unit"], 3),
                       delta=fmt_pct(br["pct_vs_prior_batch"]) if pd.notna(br["pct_vs_prior_batch"]) else None)
             c3.metric("Yield", f"{fmt_num(br['actual_yield'])} {br['yield_units'] or ''}".strip())
-            c4.metric("Coverage", f"{br['dollar_coverage_pct']*100:.0f}%" if pd.notna(br["dollar_coverage_pct"]) else "—")
+            c4.metric("Coverage", f"{br['dollar_coverage_pct']*100:.0f}%" if pd.notna(br["dollar_coverage_pct"]) else "--")
 
         # Load ingredient detail
         with st.spinner("Loading ingredient detail..."):
@@ -548,23 +548,23 @@ with tab_drilldown:
 
                 ingredient_rows.append({
                     "Ingredient": row["rm_item_name"],
-                    "Category": row["Item_Category"] or "—",
-                    "Lot": row["rm_lot_number"] or "—",
+                    "Category": row["Item_Category"] or "--",
+                    "Lot": row["rm_lot_number"] or "--",
                     "Qty": f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
-                    "Batch Cost/Unit": fmt_currency(row["batch_unit_cost"], 4) if pd.notna(row["batch_unit_cost"]) else "—",
-                    "Extended Cost": fmt_currency(row["batch_extended_cost"], 2) if pd.notna(row["batch_extended_cost"]) else "—",
-                    "Last PO Cost": fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else "—",
-                    "% vs PO": fmt_pct(pct_var) if pd.notna(pct_var) else "—",
-                    "$ vs PO": fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "—",
-                    "PO Date": str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "—",
-                    "Match": row["match_status"] or "—",
+                    "Batch Cost/Unit": fmt_currency(row["batch_unit_cost"], 4) if pd.notna(row["batch_unit_cost"]) else "--",
+                    "Extended Cost": fmt_currency(row["batch_extended_cost"], 2) if pd.notna(row["batch_extended_cost"]) else "--",
+                    "Last PO Cost": fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else "--",
+                    "% vs PO": fmt_pct(pct_var) if pd.notna(pct_var) else "--",
+                    "$ vs PO": fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "--",
+                    "PO Date": str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "--",
+                    "Match": row["match_status"] or "--",
                     "Flag": row["exception_flag"] or "",
                 })
 
             ing_df = pd.DataFrame(ingredient_rows)
 
             def color_pct_var(val):
-                if val == "—": return ""
+                if val == "--": return ""
                 try:
                     num = float(val.replace("+","").replace("%",""))
                     if num > 10: return "color: #f85149; font-weight: 600"
@@ -614,13 +614,13 @@ with tab_drilldown:
             if br["prior_batch_number"]:
                 st.caption(
                     f"Prior batch: **{br['prior_batch_number']}** "
-                    f"({str(br['prior_batch_date'])[:10] if pd.notna(br['prior_batch_date']) else '—'}) · "
+                    f"({str(br['prior_batch_date'])[:10] if pd.notna(br['prior_batch_date']) else '--'}) · "
                     f"Cost: {fmt_currency(br['prior_batch_blended_cost'])} · "
                     f"CPU: {fmt_currency(br['prior_batch_cost_per_unit'], 3)}"
                 )
 
 # ════════════════════════════════════════════════════════════════════════════════
-# TAB 3 — EXCEPTIONS
+# TAB 3 -- EXCEPTIONS
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_exceptions:
     st.markdown('<div class="section-header">Batches Requiring Attention</div>', unsafe_allow_html=True)
