@@ -3,7 +3,6 @@ import pandas as pd
 from google.cloud import bigquery
 from datetime import datetime, timedelta, date
 import plotly.graph_objects as go
-import plotly.express as px
 
 st.set_page_config(page_title="PabstBrain | Sales", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
 
@@ -55,9 +54,12 @@ def run_query(sql):
 # ── CONSTANTS ─────────────────────────────────────────────────────────────────
 SEMANTIC = "`amplified-name-490015-e0.pabst_mis.gold_sales_semantic`"
 DETAIL   = "`amplified-name-490015-e0.pabst_mis.gold_sales_detail`"
-BRAND_COLORS = {'St Ides': '#38bdf8', 'PBR': '#818cf8', 'NYF': '#a78bfa', 'UNMAPPED': '#475569'}
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
+def esc(val):
+    """Escape single quotes for BigQuery by doubling them."""
+    return str(val).replace("'", "''")
+
 def get_period_dates(period):
     today = date.today()
     if period == "Curr Month":
@@ -90,12 +92,8 @@ def fmt_currency(v):
     if abs(v) >= 1_000: return f"${v:,.0f}"
     return f"${v:,.0f}"
 
-def fmt_pct(v):
-    if v is None or (isinstance(v, float) and pd.isna(v)): return "0.0%"
-    return f"{v:.1f}%"
-
 def fmt_number(v):
-    if v is None: return "0"
+    if v is None or (isinstance(v, float) and pd.isna(v)): return "0"
     return f"{int(v):,}"
 
 def kpi(label, value, sub=None, color=""):
@@ -133,37 +131,72 @@ with pcols[-2]:
 with pcols[-1]:
     end_date = st.date_input("To", value=end_date, label_visibility="collapsed")
 
+# Fix 4: guard reversed dates
+if start_date > end_date:
+    st.error("'From' date must be before 'To' date.")
+    st.stop()
+
 # ── FILTERS ───────────────────────────────────────────────────────────────────
 f1, f2, f3 = st.columns(3)
+
 with f1:
     rep_opts = ["All Reps"]
     try:
-        rep_opts += run_query(f"SELECT DISTINCT soldBy FROM {SEMANTIC} WHERE orderDate BETWEEN '{start_date}' AND '{end_date}' AND soldBy IS NOT NULL ORDER BY soldBy")['soldBy'].tolist()
+        # Fix 7: rep options filtered by current date range
+        rep_opts += run_query(f"""
+            SELECT DISTINCT soldBy
+            FROM {SEMANTIC}
+            WHERE orderDate BETWEEN '{start_date}' AND '{end_date}'
+              AND soldBy IS NOT NULL
+            ORDER BY soldBy
+        """)['soldBy'].tolist()
     except: pass
     sel_rep = st.selectbox("Rep", rep_opts, label_visibility="collapsed")
 
 with f2:
-    brand_opts = ["All Brands", "St Ides", "PBR", "NYF"]
+    # Fix 3: dynamic brand list from semantic
+    brand_opts = ["All Brands"]
+    try:
+        brands = run_query(f"""
+            SELECT DISTINCT brand_clean
+            FROM {SEMANTIC}
+            WHERE orderDate BETWEEN '{start_date}' AND '{end_date}'
+              AND brand_clean != 'UNMAPPED'
+            ORDER BY brand_clean
+        """)['brand_clean'].tolist()
+        brand_opts += brands
+    except:
+        brand_opts += ["St Ides", "PBR", "NYF"]
     sel_brand = st.selectbox("Brand", brand_opts, label_visibility="collapsed")
 
 with f3:
+    # Fix 7: warehouse options filtered by date and rep
     wh_opts = ["All Warehouses"]
     try:
-        wh_opts += run_query(f"SELECT DISTINCT sourceWarehouse FROM {SEMANTIC} WHERE sourceWarehouse IS NOT NULL ORDER BY sourceWarehouse")['sourceWarehouse'].tolist()
+        wh_where = [f"orderDate BETWEEN '{start_date}' AND '{end_date}'"]
+        if sel_rep != "All Reps": wh_where.append(f"soldBy = '{esc(sel_rep)}'")
+        wh_opts += run_query(f"""
+            SELECT DISTINCT sourceWarehouse
+            FROM {SEMANTIC}
+            WHERE {' AND '.join(wh_where)}
+              AND sourceWarehouse IS NOT NULL
+            ORDER BY sourceWarehouse
+        """)['sourceWarehouse'].tolist()
     except: pass
     sel_wh = st.selectbox("Warehouse", wh_opts, label_visibility="collapsed")
 
-# ── WHERE CLAUSE (canonical) ──────────────────────────────────────────────────
+# ── WHERE CLAUSE — Fix 1: use esc() for all user inputs ───────────────────────
 where = [f"orderDate BETWEEN '{start_date}' AND '{end_date}'"]
-if sel_rep != "All Reps":    where.append(f"soldBy = '{sel_rep}'")
-if sel_brand != "All Brands": where.append(f"brand_clean = '{sel_brand}'")
-if sel_wh != "All Warehouses": where.append(f"sourceWarehouse = '{sel_wh}'")
+if sel_rep   != "All Reps":      where.append(f"soldBy = '{esc(sel_rep)}'")
+if sel_brand != "All Brands":    where.append(f"brand_clean = '{esc(sel_brand)}'")
+if sel_wh    != "All Warehouses": where.append(f"sourceWarehouse = '{esc(sel_wh)}'")
 wc = " AND ".join(where)
 
-# ── AUDIT BANNER ──────────────────────────────────────────────────────────────
+# ── AUDIT BANNER — Fix 2: clarify source per tab ─────────────────────────────
 st.markdown(f"""
 <div class="audit-banner">
-  SOURCE: gold_sales_semantic (DIRECT_RETAIL only) &nbsp;|&nbsp;
+  MAIN TABS: gold_sales_semantic (DIRECT_RETAIL only) &nbsp;|&nbsp;
+  AUDIT TAB: gold_sales_detail (all channels) &nbsp;|&nbsp;
   REVENUE: netRevenue = lineItemSubtotal − allocated_orderDiscount − allocated_creditMemo &nbsp;|&nbsp;
   COGS: materials only (labor excluded) &nbsp;|&nbsp;
   CREDIT MEMO: reliable from Feb 15 2025 &nbsp;|&nbsp;
@@ -175,36 +208,37 @@ st.markdown(f"""
 try:
     s = run_query(f"""
     SELECT
-      ROUND(SUM(grossRevenue), 2)                          AS gross,
-      ROUND(SUM(netRevenue), 2)                            AS net,
-      ROUND(SUM(discount_amount), 2)                       AS disc,
-      ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS promo,
-      COUNT(DISTINCT orderNumber)                          AS orders,
-      COUNT(DISTINCT retailerId)                           AS accts,
-      ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT orderNumber), 0), 2) AS avg_order,
-      ROUND(SUM(units), 0)                                 AS units,
+      ROUND(SUM(grossRevenue), 2)                                           AS gross,
+      ROUND(SUM(netRevenue), 2)                                             AS net,
+      ROUND(SUM(discount_amount), 2)                                        AS disc,
+      ROUND(SUM(CASE WHEN CAST(isPennyOut AS INT64) = 1
+                THEN pennyOutValue ELSE 0 END), 2)                          AS promo,
+      COUNT(DISTINCT orderNumber)                                           AS orders,
+      COUNT(DISTINCT retailerId)                                            AS accts,
+      ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT orderNumber), 0), 2)   AS avg_order,
+      ROUND(SUM(units), 0)                                                  AS units,
       ROUND(SUM(CASE WHEN brand_clean = 'St Ides' THEN netRevenue ELSE 0 END), 2) AS st_ides,
       ROUND(SUM(CASE WHEN brand_clean = 'PBR'     THEN netRevenue ELSE 0 END), 2) AS pbr,
       ROUND(SUM(CASE WHEN brand_clean = 'NYF'     THEN netRevenue ELSE 0 END), 2) AS nyf
     FROM {SEMANTIC}
     WHERE {wc}
-    """).iloc[0]
+    """).iloc[0].fillna(0)  # Fix 5: fillna before any comparisons
 
     k = st.columns(8)
-    k[0].markdown(kpi("Gross (List)", fmt_currency(s.gross)), unsafe_allow_html=True)
-    k[1].markdown(kpi("Net Revenue", fmt_currency(s.net), color="kpi-positive"), unsafe_allow_html=True)
-    k[2].markdown(kpi("Discounts", fmt_currency(s.disc), color="kpi-negative"), unsafe_allow_html=True)
-    k[3].markdown(kpi("Promos", fmt_currency(s.promo), color="kpi-negative"), unsafe_allow_html=True)
-    k[4].markdown(kpi("Orders", fmt_number(s.orders), color="kpi-neutral"), unsafe_allow_html=True)
-    k[5].markdown(kpi("Accts", fmt_number(s.accts), f"Avg {fmt_currency(s.avg_order)}"), unsafe_allow_html=True)
-    k[6].markdown(kpi("Avg Order", fmt_currency(s.avg_order), color="kpi-neutral"), unsafe_allow_html=True)
-    k[7].markdown(kpi("Units", fmt_number(s.units)), unsafe_allow_html=True)
+    k[0].markdown(kpi("Gross (List)",  fmt_currency(s.gross)),                         unsafe_allow_html=True)
+    k[1].markdown(kpi("Net Revenue",   fmt_currency(s.net),   color="kpi-positive"),   unsafe_allow_html=True)
+    k[2].markdown(kpi("Discounts",     fmt_currency(s.disc),  color="kpi-negative"),   unsafe_allow_html=True)
+    k[3].markdown(kpi("Promos",        fmt_currency(s.promo), color="kpi-negative"),   unsafe_allow_html=True)
+    k[4].markdown(kpi("Orders",        fmt_number(s.orders),  color="kpi-neutral"),    unsafe_allow_html=True)
+    k[5].markdown(kpi("Accts",         fmt_number(s.accts),   f"Avg {fmt_currency(s.avg_order)}"), unsafe_allow_html=True)
+    k[6].markdown(kpi("Avg Order",     fmt_currency(s.avg_order), color="kpi-neutral"), unsafe_allow_html=True)
+    k[7].markdown(kpi("Units",         fmt_number(s.units)),                           unsafe_allow_html=True)
 
-    total_brand = max((s.st_ides or 0) + (s.pbr or 0) + (s.nyf or 0), 1)
+    total_brand = max(float(s.st_ides) + float(s.pbr) + float(s.nyf), 1)
     b1, b2, b3 = st.columns(3)
-    b1.markdown(kpi("🔵 St Ides", fmt_currency(s.st_ides), f"{(s.st_ides or 0)/total_brand*100:.1f}% of net", "kpi-neutral"), unsafe_allow_html=True)
-    b2.markdown(kpi("🟦 PBR",     fmt_currency(s.pbr),     f"{(s.pbr or 0)/total_brand*100:.1f}% of net"), unsafe_allow_html=True)
-    b3.markdown(kpi("🟣 NYF",     fmt_currency(s.nyf),     f"{(s.nyf or 0)/total_brand*100:.1f}% of net"), unsafe_allow_html=True)
+    b1.markdown(kpi("🔵 St Ides", fmt_currency(s.st_ides), f"{float(s.st_ides)/total_brand*100:.1f}% of net", "kpi-neutral"), unsafe_allow_html=True)
+    b2.markdown(kpi("🟦 PBR",     fmt_currency(s.pbr),     f"{float(s.pbr)/total_brand*100:.1f}% of net"),    unsafe_allow_html=True)
+    b3.markdown(kpi("🟣 NYF",     fmt_currency(s.nyf),     f"{float(s.nyf)/total_brand*100:.1f}% of net"),    unsafe_allow_html=True)
 
 except Exception as e:
     st.warning(f"KPI error: {str(e)[:120]}")
@@ -228,28 +262,31 @@ with tab1:
         FROM {SEMANTIC}
         WHERE {wc} GROUP BY orderDate ORDER BY orderDate
         """)
-        fig = go.Figure()
-        for col, clr, lbl in [('st_ides','#38bdf8','St Ides'),('pbr','#818cf8','PBR'),('nyf','#a78bfa','NYF')]:
-            fig.add_trace(go.Bar(name=lbl, x=pd.to_datetime(cd["orderDate"]), y=cd[col],
-                marker_color=clr, opacity=0.9))
-        fig.update_layout(barmode='stack', height=280,
-            legend=dict(orientation='h', yanchor='top', y=-0.15, xanchor='center', x=0.5, bgcolor='rgba(0,0,0,0)'),
-            **plotly_defaults())
-        st.plotly_chart(fig, use_container_width=True)
+        if not cd.empty:
+            cd['orderDate'] = pd.to_datetime(cd['orderDate'])
+            fig = go.Figure()
+            for col, clr, lbl in [('st_ides','#38bdf8','St Ides'),('pbr','#818cf8','PBR'),('nyf','#a78bfa','NYF')]:
+                fig.add_trace(go.Bar(name=lbl, x=cd['orderDate'], y=cd[col], marker_color=clr, opacity=0.9))
+            fig.update_layout(barmode='stack', height=280,
+                legend=dict(orientation='h', yanchor='top', y=-0.15, xanchor='center', x=0.5, bgcolor='rgba(0,0,0,0)'),
+                **plotly_defaults())
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No deliveries in this period.")
     except Exception as e:
         st.error(f"Chart error: {str(e)[:150]}")
 
     st.markdown('<div class="section-header">Daily Summary</div>', unsafe_allow_html=True)
     try:
         dd = run_query(f"""
-        SELECT
-          orderDate                                          AS Date,
-          COUNT(DISTINCT orderNumber)                        AS Orders,
-          COUNT(DISTINCT retailerId)                         AS Accts,
-          ROUND(SUM(grossRevenue), 2)                        AS Gross,
-          ROUND(SUM(discount_amount), 2)                     AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
-          ROUND(SUM(netRevenue), 2)                          AS Net,
+        SELECT orderDate AS Date,
+          COUNT(DISTINCT orderNumber)  AS Orders,
+          COUNT(DISTINCT retailerId)   AS Accts,
+          ROUND(SUM(grossRevenue), 2)  AS Gross,
+          ROUND(SUM(discount_amount), 2) AS Discounts,
+          ROUND(SUM(CASE WHEN CAST(isPennyOut AS INT64) = 1
+                    THEN pennyOutValue ELSE 0 END), 2)  AS Promos,
+          ROUND(SUM(netRevenue), 2)    AS Net,
           ROUND(SUM(CASE WHEN brand_clean = 'St Ides' THEN netRevenue ELSE 0 END), 2) AS St_Ides,
           ROUND(SUM(CASE WHEN brand_clean = 'PBR'     THEN netRevenue ELSE 0 END), 2) AS PBR,
           ROUND(SUM(CASE WHEN brand_clean = 'NYF'     THEN netRevenue ELSE 0 END), 2) AS NYF
@@ -270,41 +307,48 @@ with tab2:
     try:
         rp = run_query(f"""
         SELECT
-          soldBy                                                     AS Rep,
-          COUNT(DISTINCT retailerId)                                 AS Accts,
-          COUNT(DISTINCT orderNumber)                                AS Orders,
-          ROUND(SUM(units), 0)                                       AS Units,
-          ROUND(SUM(grossRevenue), 2)                                AS Gross,
-          ROUND(SUM(discount_amount), 2)                             AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
-          ROUND(SUM(netRevenue), 2)                                  AS Net_Rev,
-          ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT retailerId), 0), 2) AS Avg_Acct,
+          soldBy                                                              AS Rep,
+          COUNT(DISTINCT retailerId)                                          AS Accts,
+          COUNT(DISTINCT orderNumber)                                         AS Orders,
+          ROUND(SUM(units), 0)                                                AS Units,
+          ROUND(SUM(grossRevenue), 2)                                         AS Gross,
+          ROUND(SUM(discount_amount), 2)                                      AS Discounts,
+          ROUND(SUM(CASE WHEN CAST(isPennyOut AS INT64) = 1
+                    THEN pennyOutValue ELSE 0 END), 2)                        AS Promos,
+          ROUND(SUM(netRevenue), 2)                                           AS Net_Rev,
+          ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT retailerId), 0), 2)  AS Avg_Acct,
           ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT orderNumber), 0), 2) AS Avg_Order,
           ROUND(SUM(discount_amount) / NULLIF(SUM(grossRevenue), 0) * 100, 1) AS Disc_Pct,
-          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END)
-            / NULLIF(SUM(grossRevenue), 0) * 100, 1)                AS Promo_Pct
+          ROUND(SUM(CASE WHEN CAST(isPennyOut AS INT64) = 1
+                    THEN pennyOutValue ELSE 0 END)
+                / NULLIF(SUM(grossRevenue), 0) * 100, 1)                     AS Promo_Pct
         FROM {SEMANTIC}
         WHERE {wc} AND soldBy IS NOT NULL
         GROUP BY soldBy ORDER BY Net_Rev DESC
         """)
+        if not rp.empty:
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                x=rp['Rep'], y=rp['Net_Rev'], marker_color='#38bdf8', opacity=0.85,
+                text=[fmt_currency(v) for v in rp['Net_Rev']], textposition='outside',
+                textfont=dict(family='DM Mono', size=9, color='#94a3b8')
+            ))
+            fig2.update_layout(height=260,
+                xaxis=dict(tickangle=-30, gridcolor='#1e2d4a', showgrid=False),
+                yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'),
+                paper_bgcolor='#0a0e1a', plot_bgcolor='#111827',
+                font=dict(family='DM Mono', color='#94a3b8', size=10),
+                margin=dict(l=0, r=0, t=20, b=60))
+            st.plotly_chart(fig2, use_container_width=True)
 
-        fig2 = go.Figure()
-        fig2.add_trace(go.Bar(
-            x=rp['Rep'], y=rp['Net_Rev'], marker_color='#38bdf8', opacity=0.85,
-            text=[fmt_currency(v) for v in rp['Net_Rev']], textposition='outside',
-            textfont=dict(family='DM Mono', size=9, color='#94a3b8')
-        ))
-        fig2.update_layout(height=260, xaxis=dict(tickangle=-30, gridcolor='#1e2d4a'),
-            yaxis=dict(gridcolor='#1e2d4a', tickprefix='$', tickformat=',.0f'),
-            **{k:v for k,v in plotly_defaults().items() if k not in ['xaxis','yaxis']})
-        st.plotly_chart(fig2, use_container_width=True)
-
-        disp = rp.copy()
-        for c in ['Gross','Discounts','Promos','Net_Rev','Avg_Acct','Avg_Order']:
-            disp[c] = disp[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
-        disp['Disc_Pct']  = disp['Disc_Pct'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
-        disp['Promo_Pct'] = disp['Promo_Pct'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
-        st.dataframe(disp, use_container_width=True, height=350)
+            disp = rp.copy()
+            for c in ['Gross','Discounts','Promos','Net_Rev','Avg_Acct','Avg_Order']:
+                disp[c] = disp[c].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
+            disp['Disc_Pct']  = disp['Disc_Pct'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
+            disp['Promo_Pct'] = disp['Promo_Pct'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else '0%')
+            st.dataframe(disp, use_container_width=True, height=350)
+        else:
+            st.info("No rep data for this period.")
     except Exception as e:
         st.error(f"Rep performance error: {str(e)[:150]}")
 
@@ -318,19 +362,18 @@ with tab3:
         try:
             top = run_query(f"""
             SELECT
-              retailerName                                              AS Account,
-              siteCity                                                  AS City,
-              soldBy                                                    AS Rep,
-              retailerCreditRating                                      AS Rating,
-              COUNT(DISTINCT orderNumber)                               AS Orders,
-              ROUND(SUM(netRevenue), 2)                                 AS Net_Rev,
+              retailerName                                                     AS Account,
+              siteCity                                                         AS City,
+              soldBy                                                           AS Rep,
+              retailerCreditRating                                             AS Rating,
+              COUNT(DISTINCT orderNumber)                                      AS Orders,
+              ROUND(SUM(netRevenue), 2)                                        AS Net_Rev,
               ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT orderNumber), 0), 2) AS Avg_Order,
-              CAST(MAX(orderDate) AS STRING)                            AS Last_Order
+              CAST(MAX(orderDate) AS STRING)                                   AS Last_Order
             FROM {SEMANTIC}
             WHERE {wc}
             GROUP BY retailerName, siteCity, soldBy, retailerCreditRating
-            ORDER BY Net_Rev DESC
-            LIMIT 50
+            ORDER BY Net_Rev DESC LIMIT 50
             """)
             disp = top.copy()
             for c in ['Net_Rev','Avg_Order']:
@@ -340,23 +383,22 @@ with tab3:
             st.error(f"Top accounts error: {str(e)[:150]}")
 
     with a2:
-        st.markdown('<div class="section-header">Inactive / Lapsed (No Order 60+ Days)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Lapsed Accounts (60+ days, no order)</div>', unsafe_allow_html=True)
         try:
             lapsed = run_query(f"""
             SELECT
-              retailerName  AS Account,
-              siteCity      AS City,
-              soldBy        AS Rep,
-              CAST(MAX(orderDate) AS STRING)            AS Last_Order,
-              DATE_DIFF(CURRENT_DATE(), MAX(orderDate), DAY) AS Days_Since,
-              ROUND(SUM(netRevenue), 2)                 AS Lifetime_Rev
+              retailerName                                     AS Account,
+              siteCity                                         AS City,
+              soldBy                                           AS Rep,
+              CAST(MAX(orderDate) AS STRING)                   AS Last_Order,
+              DATE_DIFF(CURRENT_DATE(), MAX(orderDate), DAY)  AS Days_Since,
+              ROUND(SUM(netRevenue), 2)                        AS Lifetime_Rev
             FROM {SEMANTIC}
             WHERE soldBy IS NOT NULL
             GROUP BY retailerName, siteCity, soldBy
             HAVING MAX(orderDate) < DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY)
               AND MAX(orderDate) >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY)
-            ORDER BY Days_Since DESC
-            LIMIT 50
+            ORDER BY Days_Since DESC LIMIT 50
             """)
             disp = lapsed.copy()
             disp['Lifetime_Rev'] = disp['Lifetime_Rev'].apply(lambda x: fmt_currency(x) if pd.notna(x) else '$0')
@@ -366,25 +408,25 @@ with tab3:
 
     st.markdown('<div class="section-header">Account Drill-Through</div>', unsafe_allow_html=True)
     try:
-        acct_list = run_query(f"SELECT DISTINCT retailerName FROM {SEMANTIC} WHERE soldBy IS NOT NULL ORDER BY retailerName")['retailerName'].tolist()
+        acct_list = run_query(f"""
+            SELECT DISTINCT retailerName
+            FROM {SEMANTIC}
+            WHERE soldBy IS NOT NULL
+            ORDER BY retailerName
+        """)['retailerName'].tolist()
         sel_acct = st.selectbox("Select Account", ["— Select —"] + acct_list, key="acct_drill")
         if sel_acct != "— Select —":
-            acct_safe = sel_acct.replace("'", "\\'")
             ah = run_query(f"""
             SELECT
-              orderDate     AS Date,
-              orderNumber   AS Order_No,
-              sku_name_raw  AS SKU,
-              brand_clean   AS Brand,
-              ROUND(units, 0) AS Units,
-              ROUND(grossRevenue, 2)   AS Gross,
-              ROUND(discount_amount, 2) AS Discount,
-              ROUND(netRevenue, 2)     AS Net,
-              data_quality_flag        AS Flag
+              orderDate, orderNumber AS Order_No, sku_name_raw AS SKU, brand_clean AS Brand,
+              ROUND(units, 0)            AS Units,
+              ROUND(grossRevenue, 2)     AS Gross,
+              ROUND(discount_amount, 2)  AS Discount,
+              ROUND(netRevenue, 2)       AS Net,
+              data_quality_flag          AS Flag
             FROM {SEMANTIC}
-            WHERE retailerName = '{acct_safe}'
-            ORDER BY orderDate DESC
-            LIMIT 200
+            WHERE retailerName = '{esc(sel_acct)}'
+            ORDER BY orderDate DESC LIMIT 200
             """)
             for c in ['Gross','Discount','Net']:
                 ah[c] = ah[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
@@ -400,15 +442,16 @@ with tab4:
     try:
         bp = run_query(f"""
         SELECT
-          brand_clean                                                  AS Brand,
-          COUNT(DISTINCT retailerId)                                   AS Accts,
-          COUNT(DISTINCT orderNumber)                                  AS Orders,
-          ROUND(SUM(units), 0)                                         AS Units,
-          ROUND(SUM(grossRevenue), 2)                                  AS Gross,
-          ROUND(SUM(discount_amount), 2)                               AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
-          ROUND(SUM(netRevenue), 2)                                    AS Net_Rev,
-          ROUND(SUM(discount_amount) / NULLIF(SUM(grossRevenue), 0) * 100, 1) AS Disc_Pct
+          brand_clean                                                           AS Brand,
+          COUNT(DISTINCT retailerId)                                            AS Accts,
+          COUNT(DISTINCT orderNumber)                                           AS Orders,
+          ROUND(SUM(units), 0)                                                  AS Units,
+          ROUND(SUM(grossRevenue), 2)                                           AS Gross,
+          ROUND(SUM(discount_amount), 2)                                        AS Discounts,
+          ROUND(SUM(CASE WHEN CAST(isPennyOut AS INT64) = 1
+                    THEN pennyOutValue ELSE 0 END), 2)                          AS Promos,
+          ROUND(SUM(netRevenue), 2)                                             AS Net_Rev,
+          ROUND(SUM(discount_amount) / NULLIF(SUM(grossRevenue), 0) * 100, 1)  AS Disc_Pct
         FROM {SEMANTIC}
         WHERE {wc}
         GROUP BY brand_clean ORDER BY Net_Rev DESC
@@ -425,16 +468,17 @@ with tab4:
     try:
         sku = run_query(f"""
         SELECT
-          brand_clean                                                  AS Brand,
-          sku_name_raw                                                 AS SKU,
-          COUNT(DISTINCT retailerId)                                   AS Accts,
-          ROUND(SUM(units), 0)                                         AS Units,
-          ROUND(SUM(units) / NULLIF(COUNT(DISTINCT retailerId), 0), 1) AS Velocity,
-          ROUND(SUM(grossRevenue), 2)                                  AS Gross,
-          ROUND(SUM(discount_amount), 2)                               AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
-          ROUND(SUM(netRevenue), 2)                                    AS Net_Rev,
-          ROUND(SUM(netRevenue) / NULLIF(SUM(units), 0), 2)           AS Net_Per_Unit
+          brand_clean                                                           AS Brand,
+          sku_name_raw                                                          AS SKU,
+          COUNT(DISTINCT retailerId)                                            AS Accts,
+          ROUND(SUM(units), 0)                                                  AS Units,
+          ROUND(SUM(units) / NULLIF(COUNT(DISTINCT retailerId), 0), 1)         AS Velocity,
+          ROUND(SUM(grossRevenue), 2)                                           AS Gross,
+          ROUND(SUM(discount_amount), 2)                                        AS Discounts,
+          ROUND(SUM(CASE WHEN CAST(isPennyOut AS INT64) = 1
+                    THEN pennyOutValue ELSE 0 END), 2)                          AS Promos,
+          ROUND(SUM(netRevenue), 2)                                             AS Net_Rev,
+          ROUND(SUM(netRevenue) / NULLIF(SUM(units), 0), 2)                    AS Net_Per_Unit
         FROM {SEMANTIC}
         WHERE {wc}
         GROUP BY brand_clean, sku_name_raw ORDER BY Net_Rev DESC
@@ -453,10 +497,11 @@ with tab4:
 with tab5:
     st.markdown("""
     <div class="audit-banner">
-      Row-level data from <strong>gold_sales_detail</strong> (all channels).
-      Every number in this dashboard traces back to these rows.
+      Source: <strong>gold_sales_detail</strong> (all channels — DIRECT_RETAIL + LEGACY_CONSIGNMENT + INTERCOMPANY).
+      Every number in the main tabs traces back to these rows.
       COGS = materials only. Credit memo reliable from Feb 15 2025.
-      Discount = grossRevenue − netRevenue. netRevenue = lineItemSubtotal − allocated_orderDiscount − allocated_creditMemo.
+      netRevenue = lineItemSubtotal − allocated_orderDiscount − allocated_creditMemo.
+      discount_amount = grossRevenue − netRevenue.
     </div>""", unsafe_allow_html=True)
 
     aud_col1, aud_col2, aud_col3 = st.columns(3)
@@ -468,16 +513,14 @@ with tab5:
         aud_brand = st.selectbox("Brand", ["All","St Ides","PBR","NYF","UNMAPPED"], key="aud_br")
 
     aud_where = [f"orderDate BETWEEN '{start_date}' AND '{end_date}'"]
-    if aud_channel != "All": aud_where.append(f"sales_channel = '{aud_channel}'")
-    if aud_flag != "All":    aud_where.append(f"data_quality_flag = '{aud_flag}'")
-    if aud_brand != "All":   aud_where.append(f"brand_clean = '{aud_brand}'")
+    if aud_channel != "All": aud_where.append(f"sales_channel = '{esc(aud_channel)}'")
+    if aud_flag    != "All": aud_where.append(f"data_quality_flag = '{esc(aud_flag)}'")
+    if aud_brand   != "All": aud_where.append(f"brand_clean = '{esc(aud_brand)}'")
     aud_wc = " AND ".join(aud_where)
 
     try:
         aud_summary = run_query(f"""
-        SELECT
-          sales_channel,
-          data_quality_flag,
+        SELECT sales_channel, data_quality_flag,
           COUNT(*) AS lines,
           ROUND(SUM(netRevenue), 2) AS net_revenue
         FROM {DETAIL}
@@ -494,32 +537,31 @@ with tab5:
         SELECT
           orderDate, orderNumber, sales_channel, soldBy,
           retailerName, siteCity, brand_clean, sku_name_raw,
-          ROUND(units, 0)                  AS units,
-          ROUND(grossRevenue, 2)           AS gross,
+          units,                            -- Fix 6: no rounding in audit tab
+          ROUND(grossRevenue, 2)            AS gross,
           ROUND(allocated_orderDiscount, 2) AS alloc_disc,
-          ROUND(allocated_creditMemo, 2)   AS alloc_credit,
-          ROUND(netRevenue, 2)             AS net,
-          ROUND(discount_amount, 2)        AS discount,
-          ROUND(cost_per_unit, 4)          AS cpu,
-          ROUND(cogs_this_line, 2)         AS cogs,
-          ROUND(gross_profit, 2)           AS gp,
-          data_quality_flag                AS flag,
-          brand_mapping_confidence         AS brand_conf
+          ROUND(allocated_creditMemo, 2)    AS alloc_credit,
+          ROUND(netRevenue, 2)              AS net,
+          ROUND(discount_amount, 2)         AS discount,
+          ROUND(cost_per_unit, 4)           AS cpu,
+          ROUND(cogs_this_line, 2)          AS cogs,
+          ROUND(gross_profit, 2)            AS gp,
+          data_quality_flag                 AS flag,
+          brand_mapping_confidence          AS brand_conf
         FROM {DETAIL}
         WHERE {aud_wc}
         ORDER BY orderDate DESC, orderNumber
         LIMIT 500
         """)
         for c in ['gross','alloc_disc','alloc_credit','net','discount','cogs','gp']:
-            detail[c] = detail[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-
+            if c in detail.columns:
+                detail[c] = detail[c].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(detail, use_container_width=True, height=500)
-
         csv = detail.to_csv(index=False)
         st.download_button(
             label="⬇ Export to CSV",
             data=csv,
-            file_name=f"pabstbrain_detail_{start_date}_{end_date}.csv",
+            file_name=f"pabstbrain_audit_{start_date}_{end_date}.csv",
             mime="text/csv"
         )
     except Exception as e:
@@ -530,7 +572,7 @@ st.markdown(f"""
 <div style="margin-top:2rem;padding-top:0.75rem;border-top:1px solid #1e2d4a;
 font-family:DM Mono,monospace;font-size:0.6rem;color:#334155;
 display:flex;justify-content:space-between">
-  <span>PABSTBRAIN v2.0</span>
-  <span>SOURCE: gold_sales_semantic | DIRECT_RETAIL ONLY</span>
+  <span>PABSTBRAIN v2.1</span>
+  <span>MAIN: gold_sales_semantic | AUDIT: gold_sales_detail</span>
   <span>{start_date} → {end_date} | Refreshes every 5 min</span>
 </div>""", unsafe_allow_html=True)
