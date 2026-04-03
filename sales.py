@@ -206,7 +206,7 @@ st.markdown(f"""
 
 # ── SUMMARY KPIs ──────────────────────────────────────────────────────────────
 try:
-    s = run_query(f"""
+    _kpi_df = run_query(f"""
     SELECT
       ROUND(SUM(grossRevenue), 2)                                           AS gross,
       ROUND(SUM(netRevenue), 2)                                             AS net,
@@ -222,7 +222,11 @@ try:
       ROUND(SUM(CASE WHEN brand_clean = 'NYF'     THEN netRevenue ELSE 0 END), 2) AS nyf
     FROM {SEMANTIC}
     WHERE {wc}
-    """).iloc[0].fillna(0)  # Fix 5: fillna before any comparisons
+    """)
+    if _kpi_df.empty:
+        st.info(f"No deliveries recorded between {start_date} and {end_date}.")
+        st.stop()
+    s = _kpi_df.iloc[0].fillna(0)
 
     k = st.columns(8)
     k[0].markdown(kpi("Gross (List)",  fmt_currency(s.gross)),                         unsafe_allow_html=True)
