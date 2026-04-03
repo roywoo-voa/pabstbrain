@@ -410,7 +410,6 @@ with tab_summary:
             "blended_cost_per_unit": "Cost Per Unit",
             "dollar_coverage_pct": "Coverage %",
         }[x],
-        horizontal=True
     )
 
     sort_asc = st.checkbox("Ascending", value=False)
