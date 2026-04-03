@@ -459,8 +459,8 @@ with tab_summary:
         return ""
 
     styled = display_df.style\
-        .applymap(color_coverage, subset=["Coverage"])\
-        .applymap(color_variance, subset=["vs Prior Batch"])\
+        .map(color_coverage, subset=["Coverage"])\
+        .map(color_variance, subset=["vs Prior Batch"])\
         .set_properties(**{
             "font-family": "DM Mono, monospace",
             "font-size": "12px",
@@ -584,8 +584,8 @@ with tab_drilldown:
                 return colors.get(val, "")
 
             styled_ing = ing_df.style\
-                .applymap(color_pct_var, subset=["% vs PO"])\
-                .applymap(color_flag, subset=["Flag"])\
+                .map(color_pct_var, subset=["% vs PO"])\
+                .map(color_flag, subset=["Flag"])\
                 .set_properties(**{
                     "font-family": "DM Mono, monospace",
                     "font-size": "11px",
