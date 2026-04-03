@@ -143,7 +143,7 @@ with f1:
     rep_opts = ["All Reps"]
     try:
         # Fix 7: rep options filtered by current date range
-        rep_opts += _kpi_df = run_query(f"""
+        rep_opts += run_query(f"""
             SELECT DISTINCT soldBy
             FROM {SEMANTIC}
             WHERE orderDate BETWEEN '{start_date}' AND '{end_date}'
