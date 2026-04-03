@@ -178,7 +178,7 @@ try:
       ROUND(SUM(grossRevenue), 2)                          AS gross,
       ROUND(SUM(netRevenue), 2)                            AS net,
       ROUND(SUM(discount_amount), 2)                       AS disc,
-      ROUND(SUM(CASE WHEN isPennyOut THEN pennyOutValue ELSE 0 END), 2) AS promo,
+      ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS promo,
       COUNT(DISTINCT orderNumber)                          AS orders,
       COUNT(DISTINCT retailerId)                           AS accts,
       ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT orderNumber), 0), 2) AS avg_order,
@@ -230,7 +230,7 @@ with tab1:
         """)
         fig = go.Figure()
         for col, clr, lbl in [('st_ides','#38bdf8','St Ides'),('pbr','#818cf8','PBR'),('nyf','#a78bfa','NYF')]:
-            fig.add_trace(go.Bar(name=lbl, x=cd['orderDate'], y=cd[col],
+            fig.add_trace(go.Bar(name=lbl, x=pd.to_datetime(cd["orderDate"]), y=cd[col],
                 marker_color=clr, opacity=0.9))
         fig.update_layout(barmode='stack', height=280,
             legend=dict(orientation='h', yanchor='top', y=-0.15, xanchor='center', x=0.5, bgcolor='rgba(0,0,0,0)'),
@@ -248,7 +248,7 @@ with tab1:
           COUNT(DISTINCT retailerId)                         AS Accts,
           ROUND(SUM(grossRevenue), 2)                        AS Gross,
           ROUND(SUM(discount_amount), 2)                     AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut THEN pennyOutValue ELSE 0 END), 2) AS Promos,
+          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
           ROUND(SUM(netRevenue), 2)                          AS Net,
           ROUND(SUM(CASE WHEN brand_clean = 'St Ides' THEN netRevenue ELSE 0 END), 2) AS St_Ides,
           ROUND(SUM(CASE WHEN brand_clean = 'PBR'     THEN netRevenue ELSE 0 END), 2) AS PBR,
@@ -276,12 +276,12 @@ with tab2:
           ROUND(SUM(units), 0)                                       AS Units,
           ROUND(SUM(grossRevenue), 2)                                AS Gross,
           ROUND(SUM(discount_amount), 2)                             AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut THEN pennyOutValue ELSE 0 END), 2) AS Promos,
+          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
           ROUND(SUM(netRevenue), 2)                                  AS Net_Rev,
           ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT retailerId), 0), 2) AS Avg_Acct,
           ROUND(SUM(netRevenue) / NULLIF(COUNT(DISTINCT orderNumber), 0), 2) AS Avg_Order,
           ROUND(SUM(discount_amount) / NULLIF(SUM(grossRevenue), 0) * 100, 1) AS Disc_Pct,
-          ROUND(SUM(CASE WHEN isPennyOut THEN pennyOutValue ELSE 0 END)
+          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END)
             / NULLIF(SUM(grossRevenue), 0) * 100, 1)                AS Promo_Pct
         FROM {SEMANTIC}
         WHERE {wc} AND soldBy IS NOT NULL
@@ -406,7 +406,7 @@ with tab4:
           ROUND(SUM(units), 0)                                         AS Units,
           ROUND(SUM(grossRevenue), 2)                                  AS Gross,
           ROUND(SUM(discount_amount), 2)                               AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut THEN pennyOutValue ELSE 0 END), 2) AS Promos,
+          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
           ROUND(SUM(netRevenue), 2)                                    AS Net_Rev,
           ROUND(SUM(discount_amount) / NULLIF(SUM(grossRevenue), 0) * 100, 1) AS Disc_Pct
         FROM {SEMANTIC}
@@ -432,7 +432,7 @@ with tab4:
           ROUND(SUM(units) / NULLIF(COUNT(DISTINCT retailerId), 0), 1) AS Velocity,
           ROUND(SUM(grossRevenue), 2)                                  AS Gross,
           ROUND(SUM(discount_amount), 2)                               AS Discounts,
-          ROUND(SUM(CASE WHEN isPennyOut THEN pennyOutValue ELSE 0 END), 2) AS Promos,
+          ROUND(SUM(CASE WHEN isPennyOut = TRUE THEN pennyOutValue ELSE 0 END), 2) AS Promos,
           ROUND(SUM(netRevenue), 2)                                    AS Net_Rev,
           ROUND(SUM(netRevenue) / NULLIF(SUM(units), 0), 2)           AS Net_Per_Unit
         FROM {SEMANTIC}
