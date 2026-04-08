@@ -314,7 +314,7 @@ with st.sidebar:
     sel_coverage = st.selectbox("Coverage Status", coverage_options)
 
     date_range = st.date_input(
-        "Batch Date Range",
+        "Completion Date Range",
         value=[],
         help="Leave empty to show all dates"
     )
@@ -404,7 +404,7 @@ with tab_summary:
         ["batch_date", "total_material_cost_blended", "pct_vs_prior_batch",
          "blended_cost_per_unit", "dollar_coverage_pct"],
         format_func=lambda x: {
-            "batch_date": "Batch Date",
+            "batch_date": "Completion Date",
             "total_material_cost_blended": "Total Material Cost",
             "pct_vs_prior_batch": "% vs Prior Batch",
             "blended_cost_per_unit": "Cost Per Unit",
