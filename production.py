@@ -824,3 +824,61 @@ with tab_product:
             f"Total units {fmt_num(total_units)} · "
             f"Avg CPU {fmt_currency(avg_cpu, 3)}"
         )
+
+        # ── INLINE DRILLDOWN ─────────────────────────────────────────────────
+        st.markdown('<div class="section-header">Batch Ingredient Drilldown</div>', unsafe_allow_html=True)
+
+        drill_options = pv.sort_values("batch_date", ascending=False)["Batch_Number"].tolist()
+        sel_drill = st.selectbox(
+            "Select run to inspect",
+            drill_options,
+            format_func=lambda b: (
+                f"{b}  ·  "
+                f"{str(pv[pv['Batch_Number']==b]['batch_date'].values[0])[:10]}  ·  "
+                f"CPU {fmt_currency(pv[pv['Batch_Number']==b]['blended_cost_per_unit'].values[0], 3)}  ·  "
+                f"{fmt_num(pv[pv['Batch_Number']==b]['actual_yield'].values[0])} units"
+            ),
+            key="pv_drill"
+        )
+
+        with st.spinner("Loading ingredient detail..."):
+            drill_silver = load_silver(sel_drill)
+
+        if drill_silver.empty:
+            st.warning("No ingredient data for this batch.")
+        else:
+            drill_br    = pv[pv["Batch_Number"] == sel_drill].iloc[0]
+            drill_yield = drill_br["actual_yield"] if pd.notna(drill_br["actual_yield"]) and drill_br["actual_yield"] > 0 else None
+
+            drill_rows = []
+            for _, row in drill_silver.iterrows():
+                ext_cost   = row["batch_extended_cost"] if pd.notna(row["batch_extended_cost"]) else None
+                contrib    = (ext_cost / drill_yield) if (ext_cost is not None and drill_yield) else None
+                pct_var    = row["pct_var_vs_last_po"]
+                dollar_var = row["dollar_var_vs_last_po"]
+                drill_rows.append({
+                    "Ingredient":     row["rm_item_name"],
+                    "Category":       row["Item_Category"] or "--",
+                    "Qty":            f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
+                    "$/Fin. Unit":    fmt_currency(contrib, 4) if contrib is not None else "--",
+                    "Extended Cost":  fmt_currency(ext_cost, 2) if ext_cost is not None else "--",
+                    "Supplier":       row["last_po_supplier"] or "--",
+                    "Last PO $/Unit": fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else "--",
+                    "PO #":           row["last_po_order_number"] or "--",
+                    "PO Date":        str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "--",
+                    "% vs PO":        fmt_pct(pct_var) if pd.notna(pct_var) else "--",
+                    "$ vs PO":        fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "--",
+                    "Flag":           row["exception_flag"] or "",
+                })
+
+            drill_df = pd.DataFrame(drill_rows)
+
+            styled_drill = drill_df.style                 .map(color_pct_var, subset=["% vs PO"])                 .map(color_flag,    subset=["Flag"])                 .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "11px"})
+
+            st.dataframe(styled_drill, use_container_width=True, height=400, hide_index=True)
+
+            dc1, dc2, dc3, dc4 = st.columns(4)
+            dc1.metric("Ingredients",        len(drill_silver))
+            dc2.metric("Total Extended Cost", fmt_currency(drill_silver["batch_extended_cost"].sum()))
+            dc3.metric("Exception Lines",     int(drill_silver["exception_flag"].notna().sum()))
+            dc4.metric("No PO Match",         int((drill_silver["match_status"] == "no_po_match").sum()))
