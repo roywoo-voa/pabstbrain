@@ -387,10 +387,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── TABS ──────────────────────────────────────────────────────────────────────
-tab_summary, tab_drilldown, tab_exceptions = st.tabs([
+tab_summary, tab_drilldown, tab_exceptions, tab_product = st.tabs([
     "📋  Batch Summary",
     "🔬  Batch Drilldown",
-    "⚠️  Exceptions"
+    "⚠️  Exceptions",
+    "🧪  Product View"
 ])
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -694,3 +695,129 @@ with tab_exceptions:
         st.line_chart(chart_data[["Cost Per Unit ($)"]], use_container_width=True, height=250)
     else:
         st.info("Need at least 2 batches to show trend.")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 4 -- PRODUCT VIEW
+# ════════════════════════════════════════════════════════════════════════════════
+with tab_product:
+    st.markdown('<div class="section-header">Product Cost Summary</div>', unsafe_allow_html=True)
+
+    # Product selector
+    pv_products = sorted(gold["Product_Name"].dropna().unique().tolist())
+    sel_pv = st.selectbox("Select Product / Flavor", pv_products, key="pv_product")
+
+    pv = gold[gold["Product_Name"] == sel_pv].copy()
+    pv["batch_date"] = pd.to_datetime(pv["batch_date"])
+    pv = pv.sort_values("batch_date")
+
+    if pv.empty:
+        st.warning("No batch data for this product.")
+    else:
+        # ── KPIs ─────────────────────────────────────────────────────────────
+        n_batches     = len(pv)
+        total_cost    = pv["total_material_cost_blended"].sum()
+        total_units   = pv["actual_yield"].sum()
+        avg_cpu       = pv["blended_cost_per_unit"].mean()
+        median_cpu    = pv["blended_cost_per_unit"].median()
+        latest_cpu    = pv.iloc[-1]["blended_cost_per_unit"]
+        first_cpu     = pv.iloc[0]["blended_cost_per_unit"]
+        cpu_direction = ((latest_cpu - first_cpu) / first_cpu) if pd.notna(first_cpu) and first_cpu > 0 else None
+        best_batch    = pv.loc[pv["blended_cost_per_unit"].idxmin()] if pv["blended_cost_per_unit"].notna().any() else None
+        worst_batch   = pv.loc[pv["blended_cost_per_unit"].idxmax()] if pv["blended_cost_per_unit"].notna().any() else None
+
+        dir_arrow = ""
+        if cpu_direction is not None:
+            dir_arrow = f"{'▲' if cpu_direction > 0 else '▼'} {abs(cpu_direction)*100:.1f}% first→last"
+
+        st.markdown(f"""
+        <div class="kpi-row">
+            <div class="kpi-card">
+                <div class="kpi-label">Production Runs</div>
+                <div class="kpi-value">{n_batches}</div>
+                <div class="kpi-sub">batches total</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Units Produced</div>
+                <div class="kpi-value">{fmt_num(total_units)}</div>
+                <div class="kpi-sub">across all runs</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Material Cost</div>
+                <div class="kpi-value">{fmt_currency(total_cost)}</div>
+                <div class="kpi-sub">blended, all runs</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Avg CPU</div>
+                <div class="kpi-value">{fmt_currency(avg_cpu, 3)}</div>
+                <div class="kpi-sub">median {fmt_currency(median_cpu, 3)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">CPU Trend</div>
+                <div class="kpi-value">{fmt_currency(latest_cpu, 3)}</div>
+                <div class="kpi-sub">{dir_arrow}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── BEST / WORST ──────────────────────────────────────────────────────
+        if best_batch is not None and worst_batch is not None:
+            bw1, bw2 = st.columns(2)
+            with bw1:
+                st.markdown(f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">🟢 Lowest Cost Run</div>
+                    <div class="kpi-value">{fmt_currency(best_batch["blended_cost_per_unit"], 3)}</div>
+                    <div class="kpi-sub">{best_batch["Batch_Number"]} · {str(best_batch["batch_date"])[:10]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with bw2:
+                st.markdown(f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">🔴 Highest Cost Run</div>
+                    <div class="kpi-value">{fmt_currency(worst_batch["blended_cost_per_unit"], 3)}</div>
+                    <div class="kpi-sub">{worst_batch["Batch_Number"]} · {str(worst_batch["batch_date"])[:10]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── CPU TREND CHART ───────────────────────────────────────────────────
+        st.markdown('<div class="section-header">Cost Per Unit — All Runs</div>', unsafe_allow_html=True)
+
+        chart_pv = pv[pv["blended_cost_per_unit"].notna()][["batch_date","blended_cost_per_unit"]].copy()
+        chart_pv = chart_pv.rename(columns={"batch_date": "Date", "blended_cost_per_unit": "Cost Per Unit ($)"}).set_index("Date")
+
+        if len(chart_pv) > 1:
+            st.line_chart(chart_pv, use_container_width=True, height=220)
+        else:
+            st.info("Need at least 2 batches to show trend.")
+
+        # ── BATCH TABLE ───────────────────────────────────────────────────────
+        st.markdown('<div class="section-header">Run-by-Run Breakdown</div>', unsafe_allow_html=True)
+
+        pv_rows = []
+        for _, r in pv.sort_values("batch_date", ascending=False).iterrows():
+            pct_var = r["pct_vs_prior_batch"]
+            pv_rows.append({
+                "Batch":          r["Batch_Number"],
+                "Date":           str(r["batch_date"])[:10],
+                "Yield":          f"{fmt_num(r['actual_yield'])} {r['yield_units'] or ''}".strip(),
+                "Material Cost":  fmt_currency(r["total_material_cost_blended"]),
+                "CPU (Blended)":  fmt_currency(r["blended_cost_per_unit"], 3),
+                "vs Prior Run":   fmt_pct(pct_var) if pd.notna(pct_var) else "--",
+                "$ vs Prior":     fmt_currency(r["dollar_vs_prior_batch"]) if pd.notna(r["dollar_vs_prior_batch"]) else "--",
+                "Coverage":       r["coverage_status"],
+                "Var Flags":      int(r["variance_exception_count"]) if pd.notna(r["variance_exception_count"]) else 0,
+            })
+
+        pv_df = pd.DataFrame(pv_rows)
+
+        styled_pv = pv_df.style            .map(color_coverage, subset=["Coverage"])            .map(color_variance, subset=["vs Prior Run"])            .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"})
+
+        st.dataframe(styled_pv, use_container_width=True, height=400, hide_index=True)
+
+        st.caption(
+            f"{sel_pv} · {n_batches} runs · "
+            f"Total cost {fmt_currency(total_cost)} · "
+            f"Total units {fmt_num(total_units)} · "
+            f"Avg CPU {fmt_currency(avg_cpu, 3)}"
+        )
