@@ -721,6 +721,9 @@ with tab_product:
         avg_cpu       = pv["blended_cost_per_unit"].mean()
         median_cpu    = pv["blended_cost_per_unit"].median()
         latest_cpu    = pv.iloc[-1]["blended_cost_per_unit"]
+        latest_cost   = pv.iloc[-1]["total_material_cost_blended"]
+        latest_yield  = pv.iloc[-1]["actual_yield"]
+        latest_batch  = pv.iloc[-1]["Batch_Number"]
         first_cpu     = pv.iloc[0]["blended_cost_per_unit"]
         cpu_direction = ((latest_cpu - first_cpu) / first_cpu) if pd.notna(first_cpu) and first_cpu > 0 else None
         best_batch    = pv.loc[pv["blended_cost_per_unit"].idxmin()] if pv["blended_cost_per_unit"].notna().any() else None
@@ -738,17 +741,17 @@ with tab_product:
                 <div class="kpi-sub">batches total</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-label">Total Units Produced</div>
-                <div class="kpi-value">{fmt_num(total_units)}</div>
-                <div class="kpi-sub">across all runs</div>
+                <div class="kpi-label">Latest Run Cost</div>
+                <div class="kpi-value">{fmt_currency(latest_cost)}</div>
+                <div class="kpi-sub">{latest_batch} · {fmt_num(latest_yield)} units</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-label">Total Material Cost</div>
-                <div class="kpi-value">{fmt_currency(total_cost)}</div>
-                <div class="kpi-sub">blended, all runs</div>
+                <div class="kpi-label">Latest CPU</div>
+                <div class="kpi-value">{fmt_currency(latest_cpu, 3)}</div>
+                <div class="kpi-sub">blended cost / unit</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-label">Avg CPU</div>
+                <div class="kpi-label">Avg CPU (All Runs)</div>
                 <div class="kpi-value">{fmt_currency(avg_cpu, 3)}</div>
                 <div class="kpi-sub">median {fmt_currency(median_cpu, 3)}</div>
             </div>
