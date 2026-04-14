@@ -231,7 +231,7 @@ def load_silver(batch_number: str):
     SELECT
         rm_item_name, Item_Category, rm_lot_number,
         qty_consumed, uom, batch_unit_cost, batch_extended_cost,
-        effective_last_po_cost, last_po_date, last_po_supplier,
+        effective_last_po_cost, last_po_date, last_po_supplier, last_po_order_number,
         avg_cost_90d, match_status,
         pct_var_vs_last_po, dollar_var_vs_last_po,
         pct_var_vs_avg_90d, dollar_var_vs_avg_90d,
@@ -546,19 +546,23 @@ with tab_drilldown:
                 dollar_var = row["dollar_var_vs_last_po"]
                 var_class = var_color_class(pct_var)
 
+                yield_qty = br["actual_yield"] if pd.notna(br["actual_yield"]) and br["actual_yield"] > 0 else None
+                ext_cost  = row["batch_extended_cost"] if pd.notna(row["batch_extended_cost"]) else None
+                contrib   = (ext_cost / yield_qty) if (ext_cost is not None and yield_qty) else None
+
                 ingredient_rows.append({
-                    "Ingredient": row["rm_item_name"],
-                    "Category": row["Item_Category"] or "--",
-                    "Lot": row["rm_lot_number"] or "--",
-                    "Qty": f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
-                    "Batch Cost/Unit": fmt_currency(row["batch_unit_cost"], 4) if pd.notna(row["batch_unit_cost"]) else "--",
-                    "Extended Cost": fmt_currency(row["batch_extended_cost"], 2) if pd.notna(row["batch_extended_cost"]) else "--",
-                    "Last PO Cost": fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else "--",
-                    "% vs PO": fmt_pct(pct_var) if pd.notna(pct_var) else "--",
-                    "$ vs PO": fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "--",
-                    "PO Date": str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "--",
-                    "Match": row["match_status"] or "--",
-                    "Flag": row["exception_flag"] or "",
+                    "Ingredient":     row["rm_item_name"],
+                    "Category":       row["Item_Category"] or "--",
+                    "Qty":            f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
+                    "$/Fin. Unit":    fmt_currency(contrib, 4) if contrib is not None else "--",
+                    "Extended Cost":  fmt_currency(row["batch_extended_cost"], 2) if pd.notna(row["batch_extended_cost"]) else "--",
+                    "Supplier":       row["last_po_supplier"] or "--",
+                    "Last PO $/Unit": fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else "--",
+                    "PO #":           row["last_po_order_number"] or "--",
+                    "PO Date":        str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "--",
+                    "% vs PO":        fmt_pct(pct_var) if pd.notna(pct_var) else "--",
+                    "$ vs PO":        fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "--",
+                    "Flag":           row["exception_flag"] or "",
                 })
 
             ing_df = pd.DataFrame(ingredient_rows)
