@@ -212,6 +212,7 @@ def load_gold():
         prior_batch_number, prior_batch_date,
         prior_batch_blended_cost, prior_batch_cost_per_unit,
         pct_vs_prior_batch, dollar_vs_prior_batch,
+        pct_cpu_vs_prior_batch, dollar_cpu_vs_prior_batch,
         costed_line_count, zero_cost_line_count,
         total_line_count, line_cost_coverage_pct, dollar_coverage_pct,
         zero_cost_high_value_line_count, has_zero_cost_high_value_input,
@@ -401,13 +402,13 @@ with tab_summary:
     st.markdown('<div class="section-header">All Batches</div>', unsafe_allow_html=True)
 
     sort_col = st.selectbox(
-        "Sort by",
-        ["batch_date", "total_material_cost_blended", "pct_vs_prior_batch",
+"Sort by",
+        ["batch_date", "total_material_cost_blended", "pct_cpu_vs_prior_batch",
          "blended_cost_per_unit", "dollar_coverage_pct"],
         format_func=lambda x: {
             "batch_date": "Completion Date",
             "total_material_cost_blended": "Total Material Cost",
-            "pct_vs_prior_batch": "% vs Prior Batch",
+            "pct_cpu_vs_prior_batch": "% vs Prior Batch (CPU)",
             "blended_cost_per_unit": "Cost Per Unit",
             "dollar_coverage_pct": "Coverage %",
         }[x],
@@ -419,7 +420,7 @@ with tab_summary:
     # Build display table
     rows = []
     for _, r in df_sorted.iterrows():
-        pct_var = r["pct_vs_prior_batch"]
+        pct_var = r["pct_cpu_vs_prior_batch"]
         var_class = var_color_class(pct_var)
         pct_str = fmt_pct(pct_var) if not pd.isna(pct_var) else "--"
 
@@ -430,8 +431,8 @@ with tab_summary:
             "Yield": f"{fmt_num(r['actual_yield'])} {r['yield_units'] or ''}".strip(),
             "Material Cost": fmt_currency(r["total_material_cost_blended"]),
             "CPU (Blended)": fmt_currency(r["blended_cost_per_unit"], 3),
-            "vs Prior Batch": pct_str,
-            "$ vs Prior": fmt_currency(r["dollar_vs_prior_batch"]),
+            "vs Prior Batch (CPU)": pct_str,
+            "$ vs Prior (CPU)": fmt_currency(r["dollar_cpu_vs_prior_batch"], 4),
             "Coverage": r["coverage_status"],
             "Costed Lines": f"{int(r['costed_line_count'])}/{int(r['total_line_count'])}",
             "Var Flags": int(r["variance_exception_count"]),
@@ -461,7 +462,7 @@ with tab_summary:
 
     styled = display_df.style\
         .map(color_coverage, subset=["Coverage"])\
-        .map(color_variance, subset=["vs Prior Batch"])\
+        .map(color_variance, subset=["vs Prior Batch (CPU)"])\
         .set_properties(**{
             "font-family": "DM Mono, monospace",
             "font-size": "12px",
@@ -510,7 +511,7 @@ with tab_drilldown:
             c1.metric("Material Cost", fmt_currency(br["total_material_cost_blended"]),
                       delta=fmt_currency(br["dollar_vs_prior_batch"]) if pd.notna(br["dollar_vs_prior_batch"]) else None)
             c2.metric("Cost / Unit", fmt_currency(br["blended_cost_per_unit"], 3),
-                      delta=fmt_pct(br["pct_vs_prior_batch"]) if pd.notna(br["pct_vs_prior_batch"]) else None)
+                      delta=fmt_pct(br["pct_cpu_vs_prior_batch"]) if pd.notna(br["pct_cpu_vs_prior_batch"]) else None)
             c3.metric("Yield", f"{fmt_num(br['actual_yield'])} {br['yield_units'] or ''}".strip())
             c4.metric("Coverage", f"{br['dollar_coverage_pct']*100:.0f}%" if pd.notna(br["dollar_coverage_pct"]) else "--")
 
@@ -800,22 +801,22 @@ with tab_product:
 
         pv_rows = []
         for _, r in pv.sort_values("batch_date", ascending=False).iterrows():
-            pct_var = r["pct_vs_prior_batch"]
+            pct_var = r["pct_cpu_vs_prior_batch"]
             pv_rows.append({
                 "Batch":          r["Batch_Number"],
                 "Date":           str(r["batch_date"])[:10],
                 "Yield":          f"{fmt_num(r['actual_yield'])} {r['yield_units'] or ''}".strip(),
                 "Material Cost":  fmt_currency(r["total_material_cost_blended"]),
                 "CPU (Blended)":  fmt_currency(r["blended_cost_per_unit"], 3),
-                "vs Prior Run":   fmt_pct(pct_var) if pd.notna(pct_var) else "--",
-                "$ vs Prior":     fmt_currency(r["dollar_vs_prior_batch"]) if pd.notna(r["dollar_vs_prior_batch"]) else "--",
+                "vs Prior Run (CPU)":   fmt_pct(pct_var) if pd.notna(pct_var) else "--",
+                "$ vs Prior (CPU)":     fmt_currency(r["dollar_cpu_vs_prior_batch"], 4) if pd.notna(r["dollar_cpu_vs_prior_batch"]) else "--",
                 "Coverage":       r["coverage_status"],
                 "Var Flags":      int(r["variance_exception_count"]) if pd.notna(r["variance_exception_count"]) else 0,
             })
 
         pv_df = pd.DataFrame(pv_rows)
 
-        styled_pv = pv_df.style            .map(color_coverage, subset=["Coverage"])            .map(color_variance, subset=["vs Prior Run"])            .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"})
+        styled_pv = pv_df.style            .map(color_coverage, subset=["Coverage"])            .map(color_variance, subset=["vs Prior Run (CPU)"])            .set_properties(**{"font-family": "DM Mono, monospace", "font-size": "12px"})
 
         st.dataframe(styled_pv, use_container_width=True, height=400, hide_index=True)
 
