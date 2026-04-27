@@ -213,6 +213,8 @@ def load_gold():
         prior_batch_blended_cost, prior_batch_cost_per_unit,
         pct_vs_prior_batch, dollar_vs_prior_batch,
         pct_cpu_vs_prior_batch, dollar_cpu_vs_prior_batch,
+        trailing_6_avg_material_cost, trailing_6_avg_cost_per_unit,
+        trailing_6_batch_count, pct_material_cost_vs_trailing_6, pct_cpu_vs_trailing_6,
         costed_line_count, zero_cost_line_count,
         total_line_count, line_cost_coverage_pct, dollar_coverage_pct,
         zero_cost_high_value_line_count, has_zero_cost_high_value_input,
@@ -230,18 +232,23 @@ def load_silver(batch_number: str):
     client = get_bq_client()
     q = f"""
     SELECT
-        rm_item_name, Item_Category, rm_lot_number,
-        qty_consumed, uom, batch_unit_cost, batch_extended_cost,
-        effective_last_po_cost, last_po_date, last_po_supplier, last_po_order_number,
-        avg_cost_90d, match_status,
-        pct_var_vs_last_po, dollar_var_vs_last_po,
-        pct_var_vs_avg_90d, dollar_var_vs_avg_90d,
-        days_since_last_po, stale_cost_flag,
-        exception_flag, variance_flag,
-        corrupted_unit_cost_flag, extended_cost_mismatch_flag
-    FROM `{PROJECT}.{DATASET}.silver_batch_material_detail`
-    WHERE Batch_Number = @batch
-    ORDER BY batch_extended_cost DESC NULLS LAST
+        s.rm_item_name, s.Item_Category, s.rm_lot_number,
+        s.qty_consumed, s.uom, s.batch_unit_cost, s.batch_extended_cost,
+        s.effective_last_po_cost, s.last_po_date, s.last_po_supplier, s.last_po_order_number,
+        s.avg_cost_90d, s.match_status,
+        s.pct_var_vs_last_po, s.dollar_var_vs_last_po,
+        s.pct_var_vs_avg_90d, s.dollar_var_vs_avg_90d,
+        s.days_since_last_po, s.stale_cost_flag,
+        s.exception_flag, s.variance_flag,
+        s.corrupted_unit_cost_flag, s.extended_cost_mismatch_flag,
+        r.recipe_rate_per_unit, r.recipe_uom, r.batches_used AS recipe_batches_used,
+        r.status AS recipe_status, r.avg_qty_per_unit AS recipe_avg_qty_per_unit
+    FROM `{PROJECT}.{DATASET}.silver_batch_material_detail` s
+    LEFT JOIN `{PROJECT}.{DATASET}.gold_recipe_rates` r
+      ON s.Product_Name = r.Product_Name
+     AND s.rm_item_name = r.rm_item_name
+    WHERE s.Batch_Number = @batch
+    ORDER BY s.batch_extended_cost DESC NULLS LAST
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("batch", "STRING", batch_number)]
