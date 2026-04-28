@@ -864,7 +864,20 @@ with tab_drilldown:
             total_waste = 0.0
             n_flags = 0
 
-            for _, row in s.iterrows():
+            # Aggregate per ingredient (collapse multi-lot rows into one display row)
+            agg_dict = {
+                "qty_consumed": "sum",
+                "batch_extended_cost": "sum",
+                "uom": "first",
+                "exception_flag": lambda v: next((x for x in v if pd.notna(x) and x != ""), ""),
+                "pct_var_vs_last_po": lambda v: next((x for x in v if pd.notna(x)), None),
+            }
+            ingredients_agg = (
+                s.groupby("rm_item_name", as_index=False, sort=False)
+                 .agg(agg_dict)
+            )
+
+            for _, row in ingredients_agg.iterrows():
                 name = row["rm_item_name"]
                 tb = theo_breakdown.get(name, {})
                 is_binding = tb.get("is_binding", False)
@@ -884,8 +897,7 @@ with tab_drilldown:
                 if waste_dollars is not None and pd.notna(waste_dollars):
                     total_waste += waste_dollars
 
-                flag_raw = row["exception_flag"]
-                flag_val = "" if pd.isna(flag_raw) else str(flag_raw)
+                flag_val = row["exception_flag"] if isinstance(row["exception_flag"], str) else ""
                 if flag_val:
                     n_flags += 1
 
