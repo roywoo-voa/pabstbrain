@@ -337,13 +337,16 @@ def compute_anomalies(silver_df, batch_row):
 
 def compute_yield_reconciliation(silver_df, batch_row):
     """Compute theoretical max yield from binding constraint.
+    Multi-lot aware: aggregates qty_consumed across all silver rows for the same
+    ingredient (a batch may pull one ingredient from multiple lots) before
+    computing theoretical yield.
     Returns dict: theo_max, binding_ingredient, actual, variance, status."""
     PACKAGING_CATEGORIES = {"Packaging Supplies", "Packaging Materials"}
     actual_yield = batch_row.get("actual_yield", None)
     if silver_df.empty or pd.isna(actual_yield) or actual_yield <= 0:
         return {"theo_max": None, "binding_ingredient": None,
                 "actual": actual_yield, "variance": None, "status": "no_data"}
-    candidates = silver_df[
+    eligible = silver_df[
         (~silver_df["Item_Category"].isin(PACKAGING_CATEGORIES))
         & (silver_df["recipe_rate_per_unit"].notna())
         & (silver_df["recipe_rate_per_unit"] > 0)
@@ -351,10 +354,14 @@ def compute_yield_reconciliation(silver_df, batch_row):
         & (silver_df["qty_consumed"] > 0)
         & (silver_df["recipe_status"].isin(["reliable", "single_batch"]))
     ].copy()
-    if candidates.empty:
+    if eligible.empty:
         return {"theo_max": None, "binding_ingredient": None,
                 "actual": actual_yield, "variance": None, "status": "no_reliable_rates"}
-    candidates["theo_yield"] = candidates["qty_consumed"] / candidates["recipe_rate_per_unit"]
+    candidates = eligible.groupby("rm_item_name", as_index=False).agg(
+        total_qty=("qty_consumed", "sum"),
+        recipe_rate_per_unit=("recipe_rate_per_unit", "first"),
+    )
+    candidates["theo_yield"] = candidates["total_qty"] / candidates["recipe_rate_per_unit"]
     candidates = candidates[candidates["theo_yield"] < actual_yield * 5]
     if candidates.empty:
         return {"theo_max": None, "binding_ingredient": None,
@@ -374,18 +381,17 @@ def compute_yield_reconciliation(silver_df, batch_row):
 def compute_theo_breakdown(silver_df, batch_row):
     """Compute per-ingredient theoretical yield, theoretical $, and waste $.
 
+    Multi-lot aware: when a batch pulls the same ingredient from multiple lots
+    (multiple silver rows), this function aggregates qty and extended cost
+    PER INGREDIENT before computing theo yield, so the binding-constraint search
+    sees one entry per ingredient rather than one entry per lot.
+
     Excludes packaging categories — packaging is consumed 1:1 with finished units
     and doesn't have a 'waste vs recipe' concept. Marked with status='packaging'.
 
-    Logic for recipe ingredients:
-    - theo_yield = qty / recipe_rate
-    - The binding constraint = ingredient with the LOWEST theo_yield among reliable rows
-    - Theo $ for binding row = its actual extended cost (no waste possible)
-    - Theo $ for non-binding rows = (binding_theo_yield * recipe_rate * unit_cost)
-    - Waste $ = Actual $ - Theo $
-
     Returns dict mapping rm_item_name -> {theo_yield, theo_dollars, waste_dollars,
-    is_binding, status}
+    is_binding, status}. The same dict is returned for every silver row of an
+    ingredient — they share the per-ingredient values.
     """
     PACKAGING_CATEGORIES = {"Packaging Supplies", "Packaging Materials"}
 
@@ -395,17 +401,18 @@ def compute_theo_breakdown(silver_df, batch_row):
 
     actual_yield = batch_row.get("actual_yield", None)
     if pd.isna(actual_yield) or actual_yield <= 0:
-        for _, r in silver_df.iterrows():
-            cat = r.get("Item_Category", None)
+        for name in silver_df["rm_item_name"].unique():
+            cat_series = silver_df[silver_df["rm_item_name"] == name]["Item_Category"]
+            cat = cat_series.iloc[0] if len(cat_series) else None
             is_pkg = cat in PACKAGING_CATEGORIES
-            result[r["rm_item_name"]] = {
+            result[name] = {
                 "theo_yield": None, "theo_dollars": None, "waste_dollars": None,
                 "is_binding": False,
                 "status": "packaging" if is_pkg else "no_yield_data"
             }
         return result
 
-    candidates = silver_df[
+    eligible = silver_df[
         (~silver_df["Item_Category"].isin(PACKAGING_CATEGORIES))
         & (silver_df["recipe_rate_per_unit"].notna())
         & (silver_df["recipe_rate_per_unit"] > 0)
@@ -414,15 +421,31 @@ def compute_theo_breakdown(silver_df, batch_row):
         & (silver_df["recipe_status"].isin(["reliable", "single_batch"]))
     ].copy()
 
-    if not candidates.empty:
-        candidates["theo_yield"] = candidates["qty_consumed"] / candidates["recipe_rate_per_unit"]
-        candidates = candidates[candidates["theo_yield"] < actual_yield * 5]
+    if eligible.empty:
+        for name in silver_df["rm_item_name"].unique():
+            cat_series = silver_df[silver_df["rm_item_name"] == name]["Item_Category"]
+            cat = cat_series.iloc[0] if len(cat_series) else None
+            is_pkg = cat in PACKAGING_CATEGORIES
+            result[name] = {
+                "theo_yield": None, "theo_dollars": None, "waste_dollars": None,
+                "is_binding": False,
+                "status": "packaging" if is_pkg else "no_reliable_rates"
+            }
+        return result
+
+    candidates = eligible.groupby("rm_item_name", as_index=False).agg(
+        total_qty=("qty_consumed", "sum"),
+        recipe_rate_per_unit=("recipe_rate_per_unit", "first"),
+    )
+    candidates["theo_yield"] = candidates["total_qty"] / candidates["recipe_rate_per_unit"]
+    candidates = candidates[candidates["theo_yield"] < actual_yield * 5]
 
     if candidates.empty:
-        for _, r in silver_df.iterrows():
-            cat = r.get("Item_Category", None)
+        for name in silver_df["rm_item_name"].unique():
+            cat_series = silver_df[silver_df["rm_item_name"] == name]["Item_Category"]
+            cat = cat_series.iloc[0] if len(cat_series) else None
             is_pkg = cat in PACKAGING_CATEGORIES
-            result[r["rm_item_name"]] = {
+            result[name] = {
                 "theo_yield": None, "theo_dollars": None, "waste_dollars": None,
                 "is_binding": False,
                 "status": "packaging" if is_pkg else "no_reliable_rates"
@@ -433,9 +456,19 @@ def compute_theo_breakdown(silver_df, batch_row):
     binding_theo_yield = candidates.loc[binding_idx, "theo_yield"]
     binding_name = candidates.loc[binding_idx, "rm_item_name"]
 
-    for _, r in silver_df.iterrows():
+    by_ingredient = silver_df.groupby("rm_item_name", as_index=False).agg(
+        total_qty=("qty_consumed", "sum"),
+        total_actual_dollars=("batch_extended_cost", "sum"),
+        Item_Category=("Item_Category", "first"),
+        recipe_rate_per_unit=("recipe_rate_per_unit", "first"),
+        recipe_status=("recipe_status", "first"),
+        effective_last_po_cost=("effective_last_po_cost", "first"),
+        batch_unit_cost=("batch_unit_cost", "first"),
+    )
+
+    for _, r in by_ingredient.iterrows():
         name = r["rm_item_name"]
-        cat = r.get("Item_Category", None)
+        cat = r["Item_Category"]
         is_pkg = cat in PACKAGING_CATEGORIES
 
         if is_pkg:
@@ -445,12 +478,13 @@ def compute_theo_breakdown(silver_df, batch_row):
             }
             continue
 
-        actual_dollars = r.get("batch_extended_cost", None)
-        recipe_rate = r.get("recipe_rate_per_unit", None)
-        recipe_status = r.get("recipe_status", None)
-        unit_cost = r.get("effective_last_po_cost", None)
+        total_qty = r["total_qty"] if pd.notna(r["total_qty"]) else 0
+        actual_dollars = r["total_actual_dollars"] if pd.notna(r["total_actual_dollars"]) else None
+        recipe_rate = r["recipe_rate_per_unit"]
+        recipe_status = r["recipe_status"]
+        unit_cost = r["effective_last_po_cost"]
         if pd.isna(unit_cost) or unit_cost == 0:
-            unit_cost = r.get("batch_unit_cost", None)
+            unit_cost = r["batch_unit_cost"]
 
         if name == binding_name:
             theo_yield = binding_theo_yield
@@ -474,7 +508,7 @@ def compute_theo_breakdown(silver_df, batch_row):
         if has_reliable_rate:
             theo_qty_needed = binding_theo_yield * recipe_rate
             theo_dollars = theo_qty_needed * unit_cost
-            theo_yield = (r["qty_consumed"] / recipe_rate) if pd.notna(r["qty_consumed"]) and r["qty_consumed"] > 0 else None
+            theo_yield = (total_qty / recipe_rate) if total_qty > 0 else None
             waste_dollars = (actual_dollars - theo_dollars) if pd.notna(actual_dollars) else None
             result[name] = {
                 "theo_yield": int(round(theo_yield)) if theo_yield is not None and pd.notna(theo_yield) else None,
