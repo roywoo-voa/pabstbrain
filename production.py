@@ -369,6 +369,106 @@ def compute_yield_reconciliation(silver_df, batch_row):
         "status": "computed"
     }
 
+def compute_theo_breakdown(silver_df, batch_row):
+    """Compute per-ingredient theoretical yield, theoretical $, and waste $.
+    
+    Logic:
+    - For ingredients with reliable recipe rates: theo_yield = qty / recipe_rate
+    - The binding constraint = ingredient with the LOWEST theo_yield among reliable rows
+    - Theo $ for binding row = its actual extended cost (it's the bottleneck, no waste possible)
+    - Theo $ for non-binding rows = (binding theo_yield * recipe_rate * unit_cost)
+    - Waste $ = Actual $ - Theo $ (only computable for ingredients with reliable rates)
+    
+    Returns dict mapping rm_item_name -> {theo_yield, theo_dollars, waste_dollars, is_binding, status}
+    """
+    result = {}
+    if silver_df.empty:
+        return result
+    
+    actual_yield = batch_row.get("actual_yield", None)
+    if pd.isna(actual_yield) or actual_yield <= 0:
+        for _, r in silver_df.iterrows():
+            result[r["rm_item_name"]] = {
+                "theo_yield": None, "theo_dollars": None, "waste_dollars": None,
+                "is_binding": False, "status": "no_yield_data"
+            }
+        return result
+    
+    candidates = silver_df[
+        (silver_df["recipe_rate_per_unit"].notna())
+        & (silver_df["recipe_rate_per_unit"] > 0)
+        & (silver_df["qty_consumed"].notna())
+        & (silver_df["qty_consumed"] > 0)
+        & (silver_df["recipe_status"].isin(["reliable", "single_batch"]))
+    ].copy()
+    
+    if not candidates.empty:
+        candidates["theo_yield"] = candidates["qty_consumed"] / candidates["recipe_rate_per_unit"]
+        candidates = candidates[candidates["theo_yield"] < actual_yield * 5]
+    
+    if candidates.empty:
+        for _, r in silver_df.iterrows():
+            result[r["rm_item_name"]] = {
+                "theo_yield": None, "theo_dollars": None, "waste_dollars": None,
+                "is_binding": False, "status": "no_reliable_rates"
+            }
+        return result
+    
+    binding_idx = candidates["theo_yield"].idxmin()
+    binding_theo_yield = candidates.loc[binding_idx, "theo_yield"]
+    binding_name = candidates.loc[binding_idx, "rm_item_name"]
+    
+    for _, r in silver_df.iterrows():
+        name = r["rm_item_name"]
+        actual_dollars = r.get("batch_extended_cost", None)
+        recipe_rate = r.get("recipe_rate_per_unit", None)
+        recipe_status = r.get("recipe_status", None)
+        unit_cost = r.get("effective_last_po_cost", None)
+        if pd.isna(unit_cost) or unit_cost == 0:
+            unit_cost = r.get("batch_unit_cost", None)
+        
+        if name == binding_name:
+            theo_yield = binding_theo_yield
+            theo_dollars = actual_dollars if pd.notna(actual_dollars) else None
+            waste_dollars = 0.0 if theo_dollars is not None else None
+            result[name] = {
+                "theo_yield": int(round(theo_yield)) if pd.notna(theo_yield) else None,
+                "theo_dollars": theo_dollars,
+                "waste_dollars": waste_dollars,
+                "is_binding": True,
+                "status": "computed"
+            }
+            continue
+        
+        has_reliable_rate = (
+            pd.notna(recipe_rate) and recipe_rate > 0
+            and recipe_status in ("reliable", "single_batch")
+            and pd.notna(unit_cost) and unit_cost > 0
+        )
+        
+        if has_reliable_rate:
+            theo_qty_needed = binding_theo_yield * recipe_rate
+            theo_dollars = theo_qty_needed * unit_cost
+            theo_yield = (r["qty_consumed"] / recipe_rate) if pd.notna(r["qty_consumed"]) and r["qty_consumed"] > 0 else None
+            waste_dollars = (actual_dollars - theo_dollars) if pd.notna(actual_dollars) else None
+            result[name] = {
+                "theo_yield": int(round(theo_yield)) if theo_yield is not None and pd.notna(theo_yield) else None,
+                "theo_dollars": theo_dollars,
+                "waste_dollars": waste_dollars,
+                "is_binding": False,
+                "status": "computed"
+            }
+        else:
+            result[name] = {
+                "theo_yield": None,
+                "theo_dollars": None,
+                "waste_dollars": None,
+                "is_binding": False,
+                "status": "no_recipe" if not pd.notna(recipe_rate) or recipe_status not in ("reliable", "single_batch") else "no_unit_cost"
+            }
+    
+    return result
+
 # ── LOAD DATA ─────────────────────────────────────────────────────────────────
 try:
     gold = load_gold()
@@ -692,58 +792,111 @@ with tab_drilldown:
             elif sel_exc == "Clean only":
                 s = s[s["exception_flag"].isna() | (s["exception_flag"] == "")]
 
-            # Build ingredient display
-            ingredient_rows = []
-            for _, row in s.iterrows():
-                pct_var = row["pct_var_vs_last_po"]
-                dollar_var = row["dollar_var_vs_last_po"]
-                var_class = var_color_class(pct_var)
+            # ── YIELD-BASED INGREDIENT TABLE (Commit C) ──────────────────────
+            theo_breakdown = compute_theo_breakdown(silver, br)
 
-                yield_qty = br["actual_yield"] if pd.notna(br["actual_yield"]) and br["actual_yield"] > 0 else None
-                ext_cost  = row["batch_extended_cost"] if pd.notna(row["batch_extended_cost"]) else None
-                contrib   = (ext_cost / yield_qty) if (ext_cost is not None and yield_qty) else None
+            ingredient_rows = []
+            total_theo = 0.0
+            total_actual = 0.0
+            total_waste = 0.0
+            n_flags = 0
+
+            for _, row in s.iterrows():
+                name = row["rm_item_name"]
+                tb = theo_breakdown.get(name, {})
+                is_binding = tb.get("is_binding", False)
+                theo_yield = tb.get("theo_yield", None)
+                theo_dollars = tb.get("theo_dollars", None)
+                waste_dollars = tb.get("waste_dollars", None)
+
+                ingredient_label = f"◆ {name} (binding)" if is_binding else name
+                ext_cost = row["batch_extended_cost"] if pd.notna(row["batch_extended_cost"]) else None
+
+                if pd.notna(ext_cost):
+                    total_actual += ext_cost
+                if theo_dollars is not None and pd.notna(theo_dollars):
+                    total_theo += theo_dollars
+                if waste_dollars is not None and pd.notna(waste_dollars):
+                    total_waste += waste_dollars
+
+                flag_val = row["exception_flag"] or ""
+                if flag_val:
+                    n_flags += 1
+
+                if flag_val == "no_po_match":
+                    flag_display = "no PO"
+                elif flag_val == "variance_above_threshold":
+                    pct = row.get("pct_var_vs_last_po")
+                    flag_display = f"{pct*100:+.1f}%" if pd.notna(pct) else "var flag"
+                elif flag_val:
+                    flag_display = flag_val.replace("_", " ")
+                else:
+                    flag_display = "—"
 
                 ingredient_rows.append({
-                    "Ingredient":     row["rm_item_name"],
-                    "Category":       row["Item_Category"] or "--",
-                    "Qty":            f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
-                    "$/Fin. Unit":    fmt_currency(contrib, 4) if contrib is not None else "--",
-                    "Extended Cost":  fmt_currency(row["batch_extended_cost"], 2) if pd.notna(row["batch_extended_cost"]) else "--",
-                    "Supplier":       row["last_po_supplier"] if pd.notna(row["last_po_supplier"]) and row["last_po_supplier"] else ("Roshi (No PO)" if (pd.notna(row["batch_unit_cost"]) and row["batch_unit_cost"] > 0) else "--"),
-                    "Cost/Unit":      fmt_currency(row["effective_last_po_cost"], 4) if pd.notna(row["effective_last_po_cost"]) else (fmt_currency(row["batch_unit_cost"], 4) if pd.notna(row["batch_unit_cost"]) and row["batch_unit_cost"] > 0 else "--"),
-                    "Source":         "PO" if pd.notna(row["effective_last_po_cost"]) else ("Roshi" if pd.notna(row["batch_unit_cost"]) and row["batch_unit_cost"] > 0 else "Missing"),
-                    "PO #":           row["last_po_order_number"] or "--",
-                    "PO Date":        str(row["last_po_date"])[:10] if pd.notna(row["last_po_date"]) else "--",
-                    "% vs PO":        fmt_pct(pct_var) if pd.notna(pct_var) else "--",
-                    "$ vs PO":        fmt_currency(dollar_var, 2) if pd.notna(dollar_var) else "--",
-                    "Flag":           row["exception_flag"] or "",
+                    "Ingredient":  ingredient_label,
+                    "Qty Pulled":  f"{fmt_num(row['qty_consumed'], 3)} {row['uom'] or ''}".strip(),
+                    "Theo Yield":  f"{theo_yield:,} ea" if theo_yield is not None else "?",
+                    "Theo $":      fmt_currency(theo_dollars, 2) if theo_dollars is not None and pd.notna(theo_dollars) else "?",
+                    "Actual $":    fmt_currency(ext_cost, 2) if ext_cost is not None else "?",
+                    "Waste $":     fmt_currency(waste_dollars, 2) if waste_dollars is not None and pd.notna(waste_dollars) else "?",
+                    "Flag":        flag_display,
                 })
+
+            ingredient_rows.append({
+                "Ingredient":  "TOTAL",
+                "Qty Pulled":  "—",
+                "Theo Yield":  "—",
+                "Theo $":      fmt_currency(total_theo, 2),
+                "Actual $":    fmt_currency(total_actual, 2),
+                "Waste $":     fmt_currency(total_waste, 2),
+                "Flag":        f"{n_flags} flag{'s' if n_flags != 1 else ''}" if n_flags else "—",
+            })
 
             ing_df = pd.DataFrame(ingredient_rows)
 
-            def color_pct_var(val):
-                if val == "--": return ""
+            def color_ingredient(val):
+                if isinstance(val, str) and val.startswith("◆"):
+                    return "color: #79c0ff; font-weight: 500"
+                if val == "TOTAL":
+                    return "color: #e8e8e8; font-weight: 600"
+                return ""
+
+            def color_waste(val):
+                if val == "?" or val == "—": return "color: #8b949e"
                 try:
-                    num = float(val.replace("+","").replace("%",""))
-                    if num > 10: return "color: #f85149; font-weight: 600"
-                    if num > 5:  return "color: #f0883e"
-                    if num < -5: return "color: #3fb950"
+                    num = float(val.replace("$","").replace(",",""))
+                    if num > 100: return "color: #f85149; font-weight: 500"
+                    if num > 10:  return "color: #f0883e"
+                    if num <= 0:  return "color: #3fb950"
                 except: pass
                 return ""
 
-            def color_flag(val):
-                colors = {
-                    "corrupted_unit_cost":     "color: #d2a8ff; background: #3d1a6e",
-                    "missing_batch_cost":      "color: #79c0ff; background: #1a2332",
-                    "zero_or_negative_cost":   "color: #f0883e; background: #2d1b00",
-                    "variance_above_threshold":"color: #f85149; background: #3d0c0c",
-                    "no_po_match":             "color: #d29922; background: #2d2006",
-                }
-                return colors.get(val, "")
+            def color_flag_pill(val):
+                if val == "—": return "color: #3fb950"
+                if val == "no PO": return "color: #d29922"
+                if val.endswith("%") and val.startswith("+"):
+                    try:
+                        num = float(val.replace("+","").replace("%",""))
+                        if num > 10: return "color: #f85149; font-weight: 500"
+                        if num > 5:  return "color: #f0883e"
+                    except: pass
+                if val.endswith("%") and val.startswith("-"):
+                    return "color: #3fb950"
+                return "color: #8b949e"
+
+            def color_total_row(row):
+                if row["Ingredient"] == "TOTAL":
+                    return ["background: #161b22; border-top: 2px solid #30363d;"] * len(row)
+                if isinstance(row["Ingredient"], str) and row["Ingredient"].startswith("◆"):
+                    return ["background: #1a2332;"] * len(row)
+                return [""] * len(row)
 
             styled_ing = ing_df.style\
-                .map(color_pct_var, subset=["% vs PO"])\
-                .map(color_flag, subset=["Flag"])\
+                .map(color_ingredient, subset=["Ingredient"])\
+                .map(color_waste, subset=["Waste $"])\
+                .map(color_flag_pill, subset=["Flag"])\
+                .apply(color_total_row, axis=1)\
                 .set_properties(**{
                     "font-family": "DM Mono, monospace",
                     "font-size": "11px",
@@ -752,8 +905,14 @@ with tab_drilldown:
             st.dataframe(
                 styled_ing,
                 use_container_width=True,
-                height=500,
+                height=520,
                 hide_index=True,
+            )
+
+            st.caption(
+                "◆ = binding constraint (lowest theoretical yield, drives the run cap) · "
+                "? = recipe rate pending or no PO · "
+                "Waste $ = (Actual $ − Theo $) anchored to binding constraint"
             )
 
             # Summary below table
