@@ -819,7 +819,8 @@ with tab_drilldown:
                 if waste_dollars is not None and pd.notna(waste_dollars):
                     total_waste += waste_dollars
 
-                flag_val = row["exception_flag"] or ""
+                flag_raw = row["exception_flag"]
+                flag_val = "" if pd.isna(flag_raw) else str(flag_raw)
                 if flag_val:
                     n_flags += 1
 
