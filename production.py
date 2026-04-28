@@ -296,6 +296,79 @@ def var_color_class(v):
     if pd.isna(v): return "neu-var"
     return "pos-var" if v > 0 else ("neg-var" if v < 0 else "neu-var")
 
+# ── VERIFICATION HELPERS (Commit B) ───────────────────────────────────────────
+
+def format_delta_pct(current, average, decimals=1, lower_is_better=True):
+    """Format a percent-difference vs an average with color hint.
+    Returns (text, color_hex). Lower-is-better flips color logic for cost-type metrics."""
+    if pd.isna(current) or pd.isna(average) or average == 0:
+        return ("--", "#8b949e")
+    pct = (current - average) / average
+    sign = "+" if pct > 0 else ""
+    text = f"{sign}{pct*100:.{decimals}f}% vs avg"
+    if abs(pct) < 0.05:
+        color = "#8b949e"
+    elif lower_is_better:
+        color = "#f85149" if pct > 0 else "#3fb950"
+    else:
+        color = "#3fb950" if pct > 0 else "#f85149"
+    return (text, color)
+
+def compute_anomalies(silver_df, batch_row):
+    """Detect data quality issues on a batch. Returns list of issue strings."""
+    issues = []
+    if silver_df.empty:
+        return issues
+    no_po = silver_df[silver_df["exception_flag"] == "no_po_match"]
+    for _, r in no_po.iterrows():
+        issues.append(f"{r['rm_item_name']}: no PO match")
+    high_var = silver_df[silver_df["exception_flag"] == "variance_above_threshold"]
+    for _, r in high_var.iterrows():
+        pct = r.get("pct_var_vs_last_po", None)
+        pct_str = f" ({pct*100:+.1f}% vs PO)" if pd.notna(pct) else ""
+        issues.append(f"{r['rm_item_name']}: variance flag{pct_str}")
+    zero_thc = silver_df[
+        (silver_df["Item_Category"].isin(["Extract (weight)", "Other Concentrate (weight)"]))
+        & ((silver_df["batch_unit_cost"].isna()) | (silver_df["batch_unit_cost"] == 0))
+    ]
+    for _, r in zero_thc.iterrows():
+        issues.append(f"{r['rm_item_name']}: zero cost on high-value input")
+    return issues
+
+def compute_yield_reconciliation(silver_df, batch_row):
+    """Compute theoretical max yield from binding constraint.
+    Returns dict: theo_max, binding_ingredient, actual, variance, status."""
+    actual_yield = batch_row.get("actual_yield", None)
+    if silver_df.empty or pd.isna(actual_yield) or actual_yield <= 0:
+        return {"theo_max": None, "binding_ingredient": None,
+                "actual": actual_yield, "variance": None, "status": "no_data"}
+    candidates = silver_df[
+        (silver_df["recipe_rate_per_unit"].notna())
+        & (silver_df["recipe_rate_per_unit"] > 0)
+        & (silver_df["qty_consumed"].notna())
+        & (silver_df["qty_consumed"] > 0)
+        & (silver_df["recipe_status"].isin(["reliable", "single_batch"]))
+    ].copy()
+    if candidates.empty:
+        return {"theo_max": None, "binding_ingredient": None,
+                "actual": actual_yield, "variance": None, "status": "no_reliable_rates"}
+    candidates["theo_yield"] = candidates["qty_consumed"] / candidates["recipe_rate_per_unit"]
+    candidates = candidates[candidates["theo_yield"] < actual_yield * 5]
+    if candidates.empty:
+        return {"theo_max": None, "binding_ingredient": None,
+                "actual": actual_yield, "variance": None, "status": "all_outliers"}
+    binding_idx = candidates["theo_yield"].idxmin()
+    theo_max = candidates.loc[binding_idx, "theo_yield"]
+    binding_ingredient = candidates.loc[binding_idx, "rm_item_name"]
+    variance = actual_yield - theo_max
+    return {
+        "theo_max": int(round(theo_max)),
+        "binding_ingredient": binding_ingredient,
+        "actual": int(round(actual_yield)),
+        "variance": int(round(variance)),
+        "status": "computed"
+    }
+
 # ── LOAD DATA ─────────────────────────────────────────────────────────────────
 try:
     gold = load_gold()
@@ -513,14 +586,85 @@ with tab_drilldown:
         br = batch_row.iloc[0]
 
         with col_info:
-            st.markdown('<div class="section-header">Batch Summary</div>', unsafe_allow_html=True)
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Material Cost", fmt_currency(br["total_material_cost_blended"]),
-                      delta=fmt_currency(br["dollar_vs_prior_batch"]) if pd.notna(br["dollar_vs_prior_batch"]) else None)
-            c2.metric("Cost / Unit", fmt_currency(br["blended_cost_per_unit"], 3),
-                      delta=fmt_pct(br["pct_cpu_vs_prior_batch"]) if pd.notna(br["pct_cpu_vs_prior_batch"]) else None)
-            c3.metric("Yield", f"{fmt_num(br['actual_yield'])} {br['yield_units'] or ''}".strip())
-            c4.metric("Coverage", f"{br['dollar_coverage_pct']*100:.0f}%" if pd.notna(br["dollar_coverage_pct"]) else "--")
+            st.markdown('<div class="section-header">Verification HUD · vs trailing-6 batches</div>', unsafe_allow_html=True)
+
+            # Load silver early so anomalies + yield reconciliation can use it
+            with st.spinner("Loading ingredient detail..."):
+                silver = load_silver(sel_batch)
+
+            # ── ANOMALY CALLOUT ──────────────────────────────────────────────
+            anomalies = compute_anomalies(silver, br)
+            if anomalies:
+                items_html = "".join([f"<li>{a}</li>" for a in anomalies])
+                st.markdown(f"""
+                <div style="background:#3d0c0c; border:1px solid #da3633; border-radius:6px; padding:10px 14px; margin-bottom:14px;">
+                  <div style="color:#f85149; font-family:'DM Mono',monospace; font-size:12px; font-weight:500; margin-bottom:6px;">
+                    ⚠ {len(anomalies)} data quality issue{'s' if len(anomalies)!=1 else ''} on this batch
+                  </div>
+                  <ul style="margin:0; padding-left:18px; color:#f0a3a3; font-size:12px; line-height:1.6;">
+                    {items_html}
+                  </ul>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── 4 KPI CARDS WITH DELTAS ──────────────────────────────────────
+            mc_text, mc_color = format_delta_pct(
+                br.get("total_material_cost_blended"),
+                br.get("trailing_6_avg_material_cost"),
+                lower_is_better=True
+            )
+            cpu_text, cpu_color = format_delta_pct(
+                br.get("blended_cost_per_unit"),
+                br.get("trailing_6_avg_cost_per_unit"),
+                lower_is_better=True
+            )
+            kpi_cards_html = f"""
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px;">
+              <div class="kpi-card" style="padding:12px 14px;">
+                <div class="kpi-label">Material Cost</div>
+                <div class="kpi-value" style="font-size:18px;">{fmt_currency(br['total_material_cost_blended'])}</div>
+                <div class="kpi-sub" style="color:{mc_color};">{mc_text}</div>
+              </div>
+              <div class="kpi-card" style="padding:12px 14px;">
+                <div class="kpi-label">Cost / Unit</div>
+                <div class="kpi-value" style="font-size:18px;">{fmt_currency(br['blended_cost_per_unit'], 4)}</div>
+                <div class="kpi-sub" style="color:{cpu_color};">{cpu_text}</div>
+              </div>
+              <div class="kpi-card" style="padding:12px 14px;">
+                <div class="kpi-label">Yield</div>
+                <div class="kpi-value" style="font-size:18px;">{fmt_num(br['actual_yield']) if pd.notna(br['actual_yield']) else '--'}</div>
+                <div class="kpi-sub">{br['yield_units'] or ''}</div>
+              </div>
+              <div class="kpi-card" style="padding:12px 14px;">
+                <div class="kpi-label">Coverage</div>
+                <div class="kpi-value" style="font-size:18px;">{br['dollar_coverage_pct']*100:.0f}%</div>
+                <div class="kpi-sub">data completeness</div>
+              </div>
+            </div>
+            """
+            st.markdown(kpi_cards_html, unsafe_allow_html=True)
+
+            # ── YIELD RECONCILIATION STRIP ───────────────────────────────────
+            ry = compute_yield_reconciliation(silver, br)
+            if ry["status"] == "computed":
+                var_color = "#3fb950" if ry["variance"] >= 0 else "#f85149"
+                var_str = f"{'+' if ry['variance']>=0 else ''}{ry['variance']:,}"
+                yield_html = f"""
+                <div style="background:#161b22; border:1px solid #21262d; border-radius:6px; padding:10px 14px; margin-bottom:14px; font-family:'DM Mono',monospace; font-size:12px;">
+                  <span style="color:#8b949e;">Theo Max:</span>
+                  <span style="color:#e8e8e8; font-weight:500;"> {ry['theo_max']:,}</span>
+                  <span style="color:#8b949e;"> (bound by {ry['binding_ingredient']})</span>
+                  <span style="color:#21262d; margin:0 8px;">|</span>
+                  <span style="color:#8b949e;">Actual:</span>
+                  <span style="color:#e8e8e8; font-weight:500;"> {ry['actual']:,}</span>
+                  <span style="color:#21262d; margin:0 8px;">|</span>
+                  <span style="color:#8b949e;">Variance:</span>
+                  <span style="color:{var_color}; font-weight:500;"> {var_str}</span>
+                </div>
+                """
+                st.markdown(yield_html, unsafe_allow_html=True)
+            elif ry["status"] in ("no_reliable_rates", "all_outliers"):
+                st.caption("Theoretical yield not computed — recipe rates pending or insufficient batch history for this SKU.")
 
         # Load ingredient detail
         with st.spinner("Loading ingredient detail..."):
